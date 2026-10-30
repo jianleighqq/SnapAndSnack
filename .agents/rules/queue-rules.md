@@ -14,7 +14,7 @@ Statuses: WAITING, REMINDED, IN_PROGRESS, COMPLETED, CANCELLED.
 - Only one event can be ACTIVE at a time. The queue, the booth screen and the guest pages all use the active event.
 
 Data model:
-events(id, name, event_type, event_code, start_time, end_time, avg_shoot_minutes, status: SCHEDULED | ACTIVE | CLOSED)
+events(id, name, event_type, event_code, start_time, end_time, avg_shoot_minutes, shots_per_guest, max_retakes, print_layout: SINGLE | STRIP | GRID, status: SCHEDULED | ACTIVE | CLOSED)
 guests(id, event_id, full_name, email, guest_token)
 queue(id, event_id, guest_id, queue_number, scheduled_shoot_time, status)
 - Shoot flow: the guest on the booth screen is the one whose status is IN_PROGRESS (set by Call Next). Start Shooting does not change the queue.
@@ -22,3 +22,4 @@ queue(id, event_id, guest_id, queue_number, scheduled_shoot_time, status)
 - Cancel Shoot in the Shoot Console leaves the guest IN_PROGRESS and returns to "/". It does not cancel the booking.
 - Only one guest can be IN_PROGRESS at a time. If no one is IN_PROGRESS, Start Shooting on "/" shows "Waiting for the next guest" instead of opening the Shoot Console.
 Queue logic (callNext, reorder, cancel, addGuest) must be pure functions with unit tests.
+- max_retakes defaults to 2 per shot. avg_shoot_minutes should leave room for retakes.

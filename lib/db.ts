@@ -120,14 +120,22 @@ class MockDataStore implements IDataStore {
 
   async getCurrentEvent(): Promise<Event> {
     this.hydrateFromStorage();
-    const active = this.events.find((e) => e.status === "ACTIVE");
-    return active ? { ...active } : { ...this.events[0] || mockEvent };
+    const active = this.events.find((e) => e.status === "ACTIVE") || this.events[0] || mockEvent;
+    return {
+      ...active,
+      shots_per_guest: active.shots_per_guest || 3,
+      max_retakes: active.max_retakes ?? 2,
+      print_layout: active.print_layout || "STRIP",
+    };
   }
 
   async createEvent(data: Omit<Event, "id">): Promise<Event> {
     this.hydrateFromStorage();
     const newEvent: Event = {
       ...data,
+      shots_per_guest: data.shots_per_guest ?? 3,
+      max_retakes: data.max_retakes ?? 2,
+      print_layout: data.print_layout ?? "STRIP",
       id: `evt_${Date.now()}`,
       created_at: new Date().toISOString(),
     };

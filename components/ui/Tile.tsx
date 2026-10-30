@@ -14,9 +14,29 @@ const tones: Record<TileTone, string> = {
 
 export interface TileProps extends React.HTMLAttributes<HTMLDivElement> {
   tone?: TileTone;
+  interactive?: boolean;
+  isSelected?: boolean;
 }
 
 /** Flat rounded color block (radius 20, no border, no shadow). */
-export function Tile({ tone = "surface", className, ...rest }: TileProps) {
-  return <div className={cn("rounded-tile", tones[tone], className)} {...rest} />;
+export function Tile({
+  tone = "surface",
+  interactive = false,
+  isSelected = false,
+  className,
+  ...rest
+}: TileProps) {
+  return (
+    <div
+      data-selected={isSelected ? "true" : undefined}
+      className={cn(
+        "rounded-tile",
+        tones[tone],
+        interactive && "interactive-tile cursor-pointer",
+        isSelected && "is-selected",
+        className
+      )}
+      {...rest}
+    />
+  );
 }

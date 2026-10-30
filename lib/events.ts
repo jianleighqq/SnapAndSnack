@@ -1,4 +1,4 @@
-import type { Event, EventType, EventStatus } from "./types";
+import type { Event, EventType, EventStatus, PrintLayout } from "./types";
 
 export interface EventFormInput {
   name: string;
@@ -7,6 +7,9 @@ export interface EventFormInput {
   start_time: string;
   end_time: string;
   avg_shoot_minutes: number;
+  shots_per_guest?: number;
+  max_retakes?: number;
+  print_layout?: PrintLayout;
 }
 
 export interface ValidationResult {

@@ -166,6 +166,14 @@ export default function EventsList({
                         {evt.event_code}
                       </span>
                     </div>
+
+                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-ink/5 text-[10px] font-mono text-muted">
+                      <span className="text-ink font-semibold">{evt.shots_per_guest || 3} {(evt.shots_per_guest || 3) === 1 ? "SHOT" : "SHOTS"}</span>
+                      <span>·</span>
+                      <span>MAX {evt.max_retakes ?? 2} RETAKES</span>
+                      <span>·</span>
+                      <span className="uppercase">{evt.print_layout || "STRIP"}</span>
+                    </div>
                   </div>
                 </div>
               </div>

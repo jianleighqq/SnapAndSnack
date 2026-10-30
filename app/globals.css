@@ -36,6 +36,153 @@
   .input-field {
     @apply min-h-[44px] w-full rounded-xl border border-transparent bg-surface px-4 text-sm text-ink transition-colors placeholder:text-muted focus:border-ink/30 focus:outline-none focus:ring-2 focus:ring-accent/30;
   }
+
+  /* Universal focus-visible ring: 2px accent #E8541E, 2px offset */
+  .focus-ring-accent {
+    outline: none;
+  }
+  .focus-ring-accent:focus-visible,
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 2px rgb(var(--paper)), 0 0 0 4px #E8541E !important;
+  }
+
+  /* Shared Interactive Tokens */
+  .interactive-base {
+    transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, transform 100ms ease;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .interactive-base svg,
+  .interactive-primary svg,
+  .interactive-secondary svg,
+  .interactive-tile svg {
+    transition: transform 200ms ease, color 200ms ease;
+  }
+
+  /* Active press feedback: universal for mouse and touch */
+  .interactive-base:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected),
+  .interactive-primary:active:not(:disabled):not([aria-disabled="true"]),
+  .interactive-secondary:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected),
+  .interactive-tile:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) {
+    transform: scale(0.98) !important;
+  }
+
+  /* Disabled state: no hover effect, cursor not-allowed */
+  .interactive-base:disabled,
+  .interactive-base[aria-disabled="true"],
+  .interactive-primary:disabled,
+  .interactive-primary[aria-disabled="true"],
+  .interactive-secondary:disabled,
+  .interactive-secondary[aria-disabled="true"],
+  .interactive-tile:disabled,
+  .interactive-tile[aria-disabled="true"] {
+    cursor: not-allowed !important;
+    opacity: 0.4 !important;
+    transform: none !important;
+  }
+
+  /* Primary dark pills (Start Countdown, Start Shooting, Keep & Next): */
+  .interactive-primary {
+    @apply interactive-base bg-ink text-paper;
+  }
+
+  .interactive-primary:active:not(:disabled):not([aria-disabled="true"]) {
+    background-color: #0B0A09 !important;
+  }
+
+  @media (hover: hover) {
+    .interactive-primary:hover:not(:disabled):not([aria-disabled="true"]) {
+      background-color: #0B0A09 !important;
+    }
+    .interactive-primary:hover:not(:disabled):not([aria-disabled="true"]) svg {
+      transform: translateX(3px);
+    }
+  }
+
+  /* Secondary pills, outline buttons, small pills ("Surprise me"): */
+  .interactive-secondary {
+    @apply interactive-base;
+  }
+
+  .interactive-secondary:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) {
+    background-color: #161513 !important;
+    color: #ffffff !important;
+    border-color: #161513 !important;
+  }
+  .interactive-secondary:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) svg,
+  .interactive-secondary:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) span,
+  .interactive-secondary:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) p {
+    color: #ffffff !important;
+  }
+
+  @media (hover: hover) {
+    .interactive-secondary:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) {
+      background-color: #161513 !important;
+      color: #ffffff !important;
+      border-color: #161513 !important;
+    }
+    .interactive-secondary:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) svg,
+    .interactive-secondary:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) span,
+    .interactive-secondary:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) p {
+      color: #ffffff !important;
+    }
+  }
+
+  /* Pose tiles and slots */
+  .interactive-tile {
+    @apply interactive-base;
+  }
+
+  .interactive-tile:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) {
+    background-color: #161513 !important;
+    color: #ffffff !important;
+    border-color: #161513 !important;
+  }
+  .interactive-tile:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) * {
+    color: #ffffff !important;
+  }
+  .interactive-tile:active:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) .tile-icon-badge {
+    background-color: #272522 !important;
+  }
+
+  @media (hover: hover) {
+    .interactive-tile:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) {
+      background-color: #161513 !important;
+      color: #ffffff !important;
+      border-color: #161513 !important;
+    }
+    .interactive-tile:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) * {
+      color: #ffffff !important;
+    }
+    .interactive-tile:hover:not(:disabled):not([aria-disabled="true"]):not([data-selected="true"]):not(.is-selected) .tile-icon-badge {
+      background-color: #272522 !important;
+    }
+  }
+
+  /* Navigation items in Operator menu */
+  .interactive-nav-item {
+    @apply focus-ring-accent select-none;
+    transition: background-color 200ms ease, color 200ms ease, transform 100ms ease;
+  }
+
+  .interactive-nav-item:active {
+    transform: scale(0.98) !important;
+  }
+
+  @media (hover: hover) {
+    .interactive-nav-item:not([aria-current="page"]):hover {
+      background-color: #161513 !important;
+      color: #ffffff !important;
+    }
+    .interactive-nav-item:not([aria-current="page"]):hover svg {
+      color: #ffffff !important;
+    }
+    .interactive-nav-item[aria-current="page"]:hover {
+      background-color: #0B0A09 !important;
+    }
+  }
 }
 
 /* Start Shooting pulse: the only animation allowed on the booth screen. */

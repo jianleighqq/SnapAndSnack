@@ -56,7 +56,7 @@ export interface IHardwareService {
   getPrinterStatus(): Promise<PrinterStatus>;
   setPaperLoaded(count: number): Promise<PrinterStatus>;
   testPrint(): Promise<HardwareTestResult & { paperLoaded: number; printsThisSession: number }>;
-  print(): Promise<PrintResult>;
+  print(imageUrl?: string): Promise<PrintResult>;
   getCloudStatus(): Promise<CloudStatus>;
   recheckCloudStatus(): Promise<CloudStatus>;
 
@@ -244,7 +244,7 @@ class MockHardwareService implements IHardwareService {
     };
   }
 
-  async print(): Promise<PrintResult> {
+  async print(imageUrl?: string): Promise<PrintResult> {
     this.hydrateFromStorage();
     // Simulate printer job processing: 2 seconds as specified
     await this.delay(2000);

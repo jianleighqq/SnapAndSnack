@@ -70,8 +70,8 @@ export default function OperatorNav() {
                   href={item.href}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors lg:px-4",
-                    isActive ? "bg-ink text-paper" : "text-ink/70 hover:bg-ink/5 hover:text-ink"
+                    "interactive-nav-item flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm font-medium lg:px-4",
+                    isActive ? "bg-ink text-paper" : "text-ink/70"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />

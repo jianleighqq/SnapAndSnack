@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { X } from "lucide-react";
-import type { Event, EventType } from "@/lib/types";
+import type { Event, EventType, PrintLayout } from "@/lib/types";
 import { validateEventInput, generateEventCode } from "@/lib/events";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
@@ -25,6 +25,12 @@ const EVENT_TYPES: EventType[] = [
   "Other",
 ];
 
+const PRINT_LAYOUTS: { id: PrintLayout; label: string; desc: string }[] = [
+  { id: "SINGLE", label: "Single", desc: "1 large framed portrait" },
+  { id: "STRIP", label: "Strip", desc: "Dual vertical strips on 4x6" },
+  { id: "GRID", label: "2x2 Grid", desc: "Quad photo collage" },
+];
+
 export default function EventModal({
   isOpen,
   eventToEdit,
@@ -39,6 +45,9 @@ export default function EventModal({
   const [startTime, setStartTime] = useState("18:00");
   const [endTime, setEndTime] = useState("23:00");
   const [avgMinutes, setAvgMinutes] = useState(5);
+  const [shotsPerGuest, setShotsPerGuest] = useState<number>(3);
+  const [maxRetakes, setMaxRetakes] = useState<number>(2);
+  const [printLayout, setPrintLayout] = useState<PrintLayout>("STRIP");
   const [eventCode, setEventCode] = useState("");
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -61,6 +70,9 @@ export default function EventModal({
       }
 
       setAvgMinutes(eventToEdit.avg_shoot_minutes || 5);
+      setShotsPerGuest(eventToEdit.shots_per_guest || 3);
+      setMaxRetakes(eventToEdit.max_retakes ?? 2);
+      setPrintLayout(eventToEdit.print_layout || "STRIP");
       setEventCode(eventToEdit.event_code);
       setCodeManuallyEdited(true);
     } else {
@@ -74,6 +86,9 @@ export default function EventModal({
       setStartTime("18:00");
       setEndTime("23:00");
       setAvgMinutes(5);
+      setShotsPerGuest(3);
+      setMaxRetakes(2);
+      setPrintLayout("STRIP");
       setEventCode("SNAP26");
       setCodeManuallyEdited(false);
     }
@@ -121,6 +136,9 @@ export default function EventModal({
       start_time: startIso,
       end_time: endIso,
       avg_shoot_minutes: Number(avgMinutes),
+      shots_per_guest: Number(shotsPerGuest),
+      max_retakes: Number(maxRetakes),
+      print_layout: printLayout,
     };
 
     const validation = validateEventInput(inputData);
@@ -294,13 +312,102 @@ export default function EventModal({
             <p className="text-xs text-danger font-semibold">{errors.end_time}</p>
           )}
 
+          {/* Photos per guest & Print Layout & Max Retakes */}
+          <div className="space-y-4 p-4 rounded-tile bg-surface">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label as="label" className="block mb-2 text-ink">
+                  Photos per guest
+                </Label>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setShotsPerGuest(num)}
+                      data-selected={shotsPerGuest === num ? "true" : undefined}
+                      className={cn(
+                        "flex-1 min-h-[44px] rounded-full text-xs font-mono font-bold",
+                        shotsPerGuest === num
+                          ? "is-selected bg-ink text-paper"
+                          : "interactive-secondary bg-paper text-ink border border-ink/15"
+                      )}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+                <span className="block mt-1 text-[11px] text-muted">
+                  {shotsPerGuest === 3 ? "3 photos (default)" : `${shotsPerGuest} ${shotsPerGuest === 1 ? "photo" : "photos"}`}
+                </span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <Label as="label" className="text-ink">
+                    Max retakes per shot
+                  </Label>
+                  <span className="text-[10px] font-mono text-accent font-semibold uppercase">Rec: 2</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {[0, 1, 2, 3, 4].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setMaxRetakes(num)}
+                      data-selected={maxRetakes === num ? "true" : undefined}
+                      className={cn(
+                        "flex-1 min-h-[44px] rounded-full text-xs font-mono font-bold",
+                        maxRetakes === num
+                          ? "is-selected bg-ink text-paper"
+                          : "interactive-secondary bg-paper text-ink border border-ink/15"
+                      )}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+                <span className="block mt-1 text-[11px] text-muted">
+                  {maxRetakes === 0 ? "No retakes allowed" : `Up to ${maxRetakes} retakes per shot`}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-ink/10">
+              <Label as="label" className="block mb-2 text-ink">
+                Print layout
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {PRINT_LAYOUTS.map((layout) => (
+                  <button
+                    key={layout.id}
+                    type="button"
+                    onClick={() => setPrintLayout(layout.id)}
+                    data-selected={printLayout === layout.id ? "true" : undefined}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-2.5 rounded-tile text-xs min-h-[44px] text-center",
+                      printLayout === layout.id
+                        ? "is-selected bg-ink text-paper font-semibold"
+                        : "interactive-secondary bg-paper text-ink border border-ink/15"
+                    )}
+                  >
+                    <span className="font-mono uppercase text-xs">{layout.label}</span>
+                    <span className={cn("text-[10px] mt-0.5", printLayout === layout.id ? "text-paper/70" : "text-muted")}>
+                      {layout.id === "STRIP" ? `Dual ${shotsPerGuest}-strip` : layout.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Event Code */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <Label as="label" htmlFor="event-code">
                 Event Code <span className="text-danger">*</span>
               </Label>
-              <span className="text-[11px] text-muted">Used for QR &amp; Guest links</span>
+              <span className="text-[11px] text-muted">Used for QR & Guest links</span>
             </div>
             <input
               id="event-code"

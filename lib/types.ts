@@ -15,6 +15,8 @@ export type EventType =
 
 export type EventStatus = "SCHEDULED" | "ACTIVE" | "CLOSED";
 
+export type PrintLayout = "SINGLE" | "STRIP" | "GRID";
+
 export interface Event {
   id: string;
   name: string;
@@ -23,6 +25,9 @@ export interface Event {
   start_time: string;
   end_time: string;
   avg_shoot_minutes: number;
+  shots_per_guest: number; // 1 to 4, default 3
+  max_retakes: number; // default 2 per shot
+  print_layout: PrintLayout; // SINGLE | STRIP | GRID
   status: EventStatus;
   created_at?: string;
 }

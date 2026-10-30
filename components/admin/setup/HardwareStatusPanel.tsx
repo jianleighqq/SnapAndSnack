@@ -298,7 +298,7 @@ export default function HardwareStatusPanel({
                   )}
                 </div>
                 <p className="text-xs text-muted font-medium mt-0.5">
-                  {cameraStatus?.model} &bull; {cameraStatus?.resolution}
+                  {cameraStatus?.model} · {cameraStatus?.resolution}
                 </p>
               </div>
             </div>
@@ -389,7 +389,7 @@ export default function HardwareStatusPanel({
                   )}
                 </div>
                 <p className="text-xs text-muted font-medium mt-0.5">
-                  Canon SELPHY CP1500 &bull; 4x6&quot; Dye-Sublimation Photo Printer
+                  Canon SELPHY CP1500 · 4x6" Dye-Sublimation Photo Printer
                 </p>
               </div>
             </div>
@@ -421,7 +421,7 @@ export default function HardwareStatusPanel({
                 <button
                   type="button"
                   onClick={() => handlePaperChange(paperInput - 1)}
-                  className="p-1 hover:bg-paper rounded-full text-ink"
+                  className="interactive-secondary p-1 rounded-full text-ink"
                   title="Decrease paper count"
                   aria-label="Decrease paper count"
                 >
@@ -440,7 +440,7 @@ export default function HardwareStatusPanel({
                 <button
                   type="button"
                   onClick={() => handlePaperChange(paperInput + 1)}
-                  className="p-1 hover:bg-paper rounded-full text-ink"
+                  className="interactive-secondary p-1 rounded-full text-ink"
                   title="Increase paper count"
                   aria-label="Increase paper count"
                 >
