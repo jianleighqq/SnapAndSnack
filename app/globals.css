@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Palette as RGB channels so Tailwind can apply opacity (e.g. bg-ink/10). */
+@layer base {
+  :root {
+    --paper: 246 244 241;
+    --ink: 22 21 19;
+    --surface: 236 235 231;
+    --muted: 115 112 107;
+    --accent: 232 84 30;
+    --sun: 245 196 0;
+    --ok: 26 138 74;
+    --warn: 183 121 31;
+    --danger: 194 59 46;
+    color-scheme: light;
+  }
+
+  .dark {
+    --paper: 18 18 16;
+    --ink: 246 244 241;
+    --surface: 30 28 26;
+    --muted: 155 151 145;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  /* Shared form field: flat surface fill, rounded, no thick border. */
+  .input-field {
+    @apply min-h-[44px] w-full rounded-xl border border-transparent bg-surface px-4 text-sm text-ink transition-colors placeholder:text-muted focus:border-ink/30 focus:outline-none focus:ring-2 focus:ring-accent/30;
+  }
+}
+
+/* Start Shooting pulse: the only animation allowed on the booth screen. */
+@keyframes soft-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(var(--accent) / 0.45);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+  70% {
+    box-shadow: 0 0 0 22px rgb(var(--accent) / 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(var(--accent) / 0);
+  }
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-soft-pulse {
+    animation: none !important;
+  }
+}
