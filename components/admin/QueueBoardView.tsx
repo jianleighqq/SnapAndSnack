@@ -104,7 +104,9 @@ export default function QueueBoardView({
         body: JSON.stringify({ action: "callNext" }),
       });
       const data = await res.json();
-      if (data.queue) {
+      if (data.message === "No guests waiting" || (data.queue && !data.promoted)) {
+        showNotification(data.message || "No guests waiting");
+      } else if (data.queue) {
         setQueue(data.queue);
         showNotification("Advanced queue: Next guest called.");
       }

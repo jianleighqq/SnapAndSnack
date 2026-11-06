@@ -4,10 +4,11 @@ import {
   callNext as pureCallNext,
   cancelBooking as pureCancelBooking,
   addGuestToQueue as pureAddGuest,
-  applyGetReadyReminders as pureApplyReminders,
+  reorderWaitingQueue as pureReorderWaitingQueue,
   startShoot as pureStartShoot,
   remindGuest as pureRemindGuest,
   finishShoot as pureFinishShoot,
+  refreshStatuses,
 } from "./queue";
 import {
   setActiveEventPure,
@@ -39,7 +40,9 @@ export interface IDataStore {
     completed: QueueEntryWithGuest | null;
     promoted: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
+    message?: string;
   }>;
+  reorderQueue(orderedWaitingIds: string[]): Promise<QueueEntryWithGuest[]>;
   startShoot(queueId: string): Promise<{
     started: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
@@ -208,14 +211,21 @@ class MockDataStore implements IDataStore {
     completed: QueueEntryWithGuest | null;
     promoted: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
+    message?: string;
   }> {
     const result = pureCallNext(this.queue);
-    this.queue = pureApplyReminders(result.updatedQueue);
+    this.queue = [...result.updatedQueue];
     return {
       completed: result.completedGuest,
       promoted: result.promotedGuest,
       queue: [...this.queue],
+      message: result.message,
     };
+  }
+
+  async reorderQueue(orderedWaitingIds: string[]): Promise<QueueEntryWithGuest[]> {
+    this.queue = pureReorderWaitingQueue(this.queue, orderedWaitingIds);
+    return [...this.queue];
   }
 
   async startShoot(queueId: string): Promise<{
@@ -223,7 +233,7 @@ class MockDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const result = pureStartShoot(this.queue, queueId);
-    this.queue = pureApplyReminders(result.updatedQueue);
+    this.queue = [...result.updatedQueue];
     return {
       started: result.startedEntry,
       queue: [...this.queue],
@@ -247,7 +257,7 @@ class MockDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const result = pureFinishShoot(this.queue, queueId);
-    this.queue = pureApplyReminders(result.updatedQueue);
+    this.queue = [...result.updatedQueue];
     return {
       finished: result.finishedEntry,
       queue: [...this.queue],
@@ -259,7 +269,7 @@ class MockDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const result = pureCancelBooking(this.queue, queueId);
-    this.queue = pureApplyReminders(result.updatedQueue);
+    this.queue = [...result.updatedQueue];
     return {
       cancelled: result.cancelledEntry,
       queue: [...this.queue],
@@ -288,7 +298,7 @@ class MockDataStore implements IDataStore {
     this.guests.push(newGuest);
 
     const result = pureAddGuest(this.queue, newGuest);
-    this.queue = pureApplyReminders(result.updatedQueue);
+    this.queue = [...result.updatedQueue];
 
     return {
       guest: newGuest,

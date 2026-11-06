@@ -12,6 +12,8 @@ Statuses: WAITING, REMINDED, IN_PROGRESS, COMPLETED, CANCELLED.
 - Queue numbers are unique per event and never reused.
 - Guests open their page with a long random guest_token in the URL. No login. A guest page shows only that guest's own queue status and photos.
 - Only one event can be ACTIVE at a time. The queue, the booth screen and the guest pages all use the active event.
+- Call Next completes the current guest and promotes the next WAITING or REMINDED guest to IN_PROGRESS. It does not touch any other guest except through the status rule below.
+- Status rule (recomputed after every queue change: Call Next, cancel, reorder, add guest): the first guest in line behind the IN_PROGRESS guest is REMINDED. Every other guest after that is WAITING. COMPLETED and CANCELLED guests never change.
 
 Data model:
 events(id, name, event_type, event_code, start_time, end_time, avg_shoot_minutes, shots_per_guest, max_retakes, print_layout: SINGLE | STRIP | GRID, status: SCHEDULED | ACTIVE | CLOSED)

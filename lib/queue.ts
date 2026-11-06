@@ -1,4 +1,4 @@
-import type { Guest, QueueEntryWithGuest, QueueItem } from "./types";
+import type { Guest, QueueEntryWithGuest } from "./types";
 
 /**
  * Pure functions for queue operations.
@@ -6,8 +6,11 @@ import type { Guest, QueueEntryWithGuest, QueueItem } from "./types";
  * Rules:
  * 1. Queue numbers are unique per event and never reused.
  * 2. Statuses: WAITING, REMINDED, IN_PROGRESS, COMPLETED, CANCELLED.
- * 3. Call Next completes the current guest and promotes the next waiting guest to IN_PROGRESS.
- * 4. 5-minute get-ready reminder applies to the 2nd person in line and beyond, not to the immediate next.
+ * 3. Status rule (recomputed after every queue change: Call Next, cancel, reorder, add guest):
+ *    The first guest in line behind the IN_PROGRESS guest is REMINDED.
+ *    Every other active guest after that is WAITING.
+ *    COMPLETED and CANCELLED guests never change.
+ * 4. Call Next completes the current guest and promotes the next waiting guest to IN_PROGRESS.
  * 5. All functions return fresh immutable arrays/objects.
  */
 
@@ -24,8 +27,54 @@ export function getActiveQueue(queue: QueueEntryWithGuest[]): QueueEntryWithGues
 }
 
 /**
+ * Pure function that recomputes queue statuses according to the business rule:
+ * - Leaves IN_PROGRESS, COMPLETED, and CANCELLED guests unchanged.
+ * - Sets the first remaining active guest (in queue order behind IN_PROGRESS) to REMINDED.
+ * - Sets all other active guests to WAITING (including guests who were REMINDED before but are no longer first).
+ * - Leaves the queue unchanged if no active waiting guests exist.
+ */
+export function refreshStatuses(queue: QueueEntryWithGuest[]): QueueEntryWithGuest[] {
+  let foundFirstActive = false;
+
+  return queue.map((item) => {
+    // Leave IN_PROGRESS, COMPLETED, and CANCELLED guests untouched
+    if (
+      item.status === "IN_PROGRESS" ||
+      item.status === "COMPLETED" ||
+      item.status === "CANCELLED"
+    ) {
+      return item;
+    }
+
+    // Active guest in line (WAITING or REMINDED)
+    if (!foundFirstActive) {
+      foundFirstActive = true;
+      if (item.status !== "REMINDED") {
+        return {
+          ...item,
+          status: "REMINDED" as const,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return item;
+    } else {
+      // All subsequent active guests must be WAITING
+      if (item.status !== "WAITING") {
+        return {
+          ...item,
+          status: "WAITING" as const,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return item;
+    }
+  });
+}
+
+/**
  * Adds a new guest to the queue.
  * Queue numbers are strictly monotonic and never reused, even if previous guests cancel.
+ * Refreshes statuses so the active line rules are respected.
  */
 export function addGuestToQueue(
   queue: QueueEntryWithGuest[],
@@ -53,54 +102,66 @@ export function addGuestToQueue(
     updated_at: new Date().toISOString(),
   };
 
+  const refreshedQueue = refreshStatuses([...queue, newEntry]);
+  const finalNewEntry = refreshedQueue.find((e) => e.id === newEntry.id) || newEntry;
+
   return {
-    updatedQueue: [...queue, newEntry],
-    newEntry,
+    updatedQueue: refreshedQueue,
+    newEntry: finalNewEntry,
   };
 }
 
 /**
  * Advances the queue:
- * - Current IN_PROGRESS guest transitions to COMPLETED.
- * - The next waiting or reminded guest transitions to IN_PROGRESS.
+ * - Sets the current IN_PROGRESS guest to COMPLETED.
+ * - Promotes the next waiting or reminded guest in queue order to IN_PROGRESS.
+ * - Calls refreshStatuses so the first remaining active guest is REMINDED and all others are WAITING.
+ * - If nobody is waiting, does nothing and returns message "No guests waiting".
  */
 export function callNext(queue: QueueEntryWithGuest[]): {
   updatedQueue: QueueEntryWithGuest[];
   completedGuest: QueueEntryWithGuest | null;
   promotedGuest: QueueEntryWithGuest | null;
+  message?: string;
 } {
+  // Find first eligible waiting or reminded guest in queue order
+  const nextCandidateIndex = queue.findIndex(
+    (item) => item.status === "WAITING" || item.status === "REMINDED"
+  );
+
+  if (nextCandidateIndex === -1) {
+    return {
+      updatedQueue: [...queue],
+      completedGuest: null,
+      promotedGuest: null,
+      message: "No guests waiting",
+    };
+  }
+
   let completedGuest: QueueEntryWithGuest | null = null;
   let promotedGuest: QueueEntryWithGuest | null = null;
 
-  // First pass: mark currently IN_PROGRESS guest as COMPLETED
-  const afterComplete = queue.map((item) => {
+  const intermediateQueue = queue.map((item, index) => {
     if (item.status === "IN_PROGRESS") {
       completedGuest = {
         ...item,
-        status: "COMPLETED",
+        status: "COMPLETED" as const,
         updated_at: new Date().toISOString(),
       };
       return completedGuest;
     }
-    return item;
-  });
-
-  // Second pass: find the first active waiting or reminded guest
-  const nextCandidateIndex = afterComplete.findIndex(
-    (item) => item.status === "WAITING" || item.status === "REMINDED"
-  );
-
-  const updatedQueue = afterComplete.map((item, index) => {
     if (index === nextCandidateIndex) {
       promotedGuest = {
         ...item,
-        status: "IN_PROGRESS",
+        status: "IN_PROGRESS" as const,
         updated_at: new Date().toISOString(),
       };
       return promotedGuest;
     }
     return item;
   });
+
+  const updatedQueue = refreshStatuses(intermediateQueue);
 
   return {
     updatedQueue,
@@ -111,7 +172,7 @@ export function callNext(queue: QueueEntryWithGuest[]): {
 
 /**
  * Cancels a booking.
- * Returns a new queue with the specified item status set to CANCELLED.
+ * Sets the specified item status to CANCELLED and recomputes REMINDED/WAITING statuses.
  */
 export function cancelBooking(
   queue: QueueEntryWithGuest[],
@@ -122,7 +183,7 @@ export function cancelBooking(
 } {
   let cancelledEntry: QueueEntryWithGuest | null = null;
 
-  const updatedQueue = queue.map((item) => {
+  const intermediate = queue.map((item) => {
     if (item.id === queueId) {
       cancelledEntry = {
         ...item,
@@ -134,13 +195,16 @@ export function cancelBooking(
     return item;
   });
 
+  const updatedQueue = refreshStatuses(intermediate);
+
   return { updatedQueue, cancelledEntry };
 }
 
 /**
  * Manually starts a shoot for a specific guest:
  * - Marks the chosen guest as IN_PROGRESS.
- * - Any guest currently IN_PROGRESS is transitioned to COMPLETED so only one party shoots at once.
+ * - Any guest currently IN_PROGRESS transitions to COMPLETED.
+ * - Refreshes statuses for the remaining active line.
  */
 export function startShoot(
   queue: QueueEntryWithGuest[],
@@ -151,7 +215,7 @@ export function startShoot(
 } {
   let startedEntry: QueueEntryWithGuest | null = null;
 
-  const updatedQueue = queue.map((item) => {
+  const intermediate = queue.map((item) => {
     if (item.id === queueId) {
       startedEntry = {
         ...item,
@@ -160,7 +224,6 @@ export function startShoot(
       };
       return startedEntry;
     }
-    // If another guest was shooting, complete their session
     if (item.status === "IN_PROGRESS") {
       return {
         ...item,
@@ -170,6 +233,8 @@ export function startShoot(
     }
     return item;
   });
+
+  const updatedQueue = refreshStatuses(intermediate);
 
   return { updatedQueue, startedEntry };
 }
@@ -213,7 +278,7 @@ export function finishShoot(
 } {
   let finishedEntry: QueueEntryWithGuest | null = null;
 
-  const updatedQueue = queue.map((item) => {
+  const intermediate = queue.map((item) => {
     if (item.id === queueId) {
       finishedEntry = {
         ...item,
@@ -225,12 +290,15 @@ export function finishShoot(
     return item;
   });
 
+  const updatedQueue = refreshStatuses(intermediate);
+
   return { updatedQueue, finishedEntry };
 }
 
 /**
  * Reorders the waiting members of the queue based on an ordered array of IDs.
  * Non-waiting members (IN_PROGRESS, COMPLETED, CANCELLED) keep their positions.
+ * Refreshes statuses so the new 1st waiting guest is REMINDED and the previous one becomes WAITING.
  */
 export function reorderWaitingQueue(
   queue: QueueEntryWithGuest[],
@@ -249,14 +317,12 @@ export function reorderWaitingQueue(
     }
   }
 
-  // Any remaining waiting entries not explicitly in orderedWaitingIds
   for (const item of Array.from(waitingMap.values())) {
     reorderedWaiting.push(item);
   }
 
-  // Reassemble preserving non-waiting slots
   let waitingIdx = 0;
-  return queue.map((item) => {
+  const intermediate = queue.map((item) => {
     if (item.status === "WAITING" || item.status === "REMINDED") {
       const nextItem = reorderedWaiting[waitingIdx];
       waitingIdx++;
@@ -264,35 +330,15 @@ export function reorderWaitingQueue(
     }
     return item;
   });
+
+  return refreshStatuses(intermediate);
 }
 
 /**
- * Evaluates who should receive the 5-minute reminder.
- * Business Rule: "The 5-minute get-ready reminder applies to the 2nd client in line and beyond,
- * not to the guest who is immediately next."
+ * Backwards compatibility alias for refreshStatuses.
  */
 export function applyGetReadyReminders(
   queue: QueueEntryWithGuest[]
 ): QueueEntryWithGuest[] {
-  // Filter active waiting/reminded entries in line order
-  const waitingEntries = queue.filter(
-    (item) => item.status === "WAITING" || item.status === "REMINDED"
-  );
-
-  // Position 0 is immediately next (no 5-minute reminder)
-  // Position 1 and beyond are the 2nd client in line and beyond
-  const reminderEligibleIds = new Set(
-    waitingEntries.slice(1).map((item) => item.id)
-  );
-
-  return queue.map((item) => {
-    if (reminderEligibleIds.has(item.id) && item.status === "WAITING") {
-      return {
-        ...item,
-        status: "REMINDED",
-        updated_at: new Date().toISOString(),
-      };
-    }
-    return item;
-  });
+  return refreshStatuses(queue);
 }
