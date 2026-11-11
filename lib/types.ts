@@ -70,3 +70,28 @@ export interface ShootMedia {
   taken_at: string;
   drive_synced?: boolean;
 }
+
+export interface PhotoTemplateSlot {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PhotoTemplate {
+  id: string;
+  event_id: string;
+  name: string;
+  layout: PrintLayout;
+  shots_count: number;
+  canvas_width: number;
+  canvas_height: number;
+  slots: PhotoTemplateSlot[];
+  frame_path: string | null;
+  background_path: string | null;
+  frame_url?: string | null; // short-lived signed URL
+  background_url?: string | null; // short-lived signed URL
+  is_active: boolean;
+  created_at?: string;
+}
+

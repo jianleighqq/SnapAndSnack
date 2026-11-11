@@ -5,6 +5,7 @@ import { Sparkles, SlidersHorizontal, Image, Camera } from "lucide-react";
 import type { Event } from "@/lib/types";
 import EventsList from "./EventsList";
 import HardwareStatusPanel from "./HardwareStatusPanel";
+import TemplatesTab from "./TemplatesTab";
 import EventModal from "./EventModal";
 import ConfirmModal from "./ConfirmModal";
 import { Pill } from "@/components/ui/Pill";
@@ -24,6 +25,8 @@ export default function EventSetupView({
   const [selectedEventId, setSelectedEventId] = useState<string>(
     initialActiveEvent?.id || initialEvents[0]?.id || ""
   );
+
+  const [currentTab, setCurrentTab] = useState<"setup" | "templates">("setup");
 
   // Modals state
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -228,25 +231,29 @@ export default function EventSetupView({
       {/* TABS ROW */}
       <div className="flex items-center justify-between pb-4">
         <div className="flex items-center gap-2">
-          {/* Active Tab */}
-          <Pill variant="primary" className="gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-accent" />
+          {/* Setup & Diagnostics Tab */}
+          <Pill
+            variant={currentTab === "setup" ? "primary" : "secondary"}
+            onClick={() => setCurrentTab("setup")}
+            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
+          >
+            <SlidersHorizontal className={`h-4 w-4 ${currentTab === "setup" ? "text-accent" : ""}`} />
             <span>Setup &amp; Diagnostics</span>
           </Pill>
 
-          {/* Disabled Tab: Templates */}
-          <div
-            className="flex min-h-[44px] items-center gap-2 rounded-full px-4 text-sm font-medium text-muted cursor-not-allowed select-none bg-ink/5"
-            title="Photo templates configuration is coming in the next phase"
+          {/* Templates Tab */}
+          <Pill
+            variant={currentTab === "templates" ? "primary" : "secondary"}
+            onClick={() => setCurrentTab("templates")}
+            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
           >
-            <Image className="h-4 w-4 opacity-50" />
+            <Image className={`h-4 w-4 ${currentTab === "templates" ? "text-accent" : ""}`} />
             <span>Templates</span>
-            <Label className="text-[10px] opacity-60">Soon</Label>
-          </div>
+          </Pill>
 
           {/* Disabled Tab: Poses */}
           <div
-            className="flex min-h-[44px] items-center gap-2 rounded-full px-4 text-sm font-medium text-muted cursor-not-allowed select-none bg-ink/5"
+            className="flex min-h-[44px] items-center gap-2 rounded-full px-4 text-xs font-mono uppercase tracking-wider text-muted cursor-not-allowed select-none bg-ink/5"
             title="Guest pose prompt configuration is coming in the next phase"
           >
             <Camera className="h-4 w-4 opacity-50" />
@@ -273,15 +280,19 @@ export default function EventSetupView({
           />
         </div>
 
-        {/* RIGHT COLUMN: Hardware Status (8 columns) */}
+        {/* RIGHT COLUMN: Tab Panel (8 columns) */}
         <div className="lg:col-span-8 h-full min-h-0 flex flex-col">
-          <HardwareStatusPanel
-            selectedEvent={selectedEvent}
-            onEditEvent={handleOpenEditModal}
-            onSetActive={handleSetActive}
-            onCloseEvent={handleCloseEvent}
-            onDeleteEvent={handleDeleteEvent}
-          />
+          {currentTab === "setup" ? (
+            <HardwareStatusPanel
+              selectedEvent={selectedEvent}
+              onEditEvent={handleOpenEditModal}
+              onSetActive={handleSetActive}
+              onCloseEvent={handleCloseEvent}
+              onDeleteEvent={handleDeleteEvent}
+            />
+          ) : (
+            <TemplatesTab selectedEvent={selectedEvent} />
+          )}
         </div>
       </div>
 

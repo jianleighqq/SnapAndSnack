@@ -28,7 +28,8 @@ import { Tile } from "@/components/ui/Tile";
 import { Hairline } from "@/components/ui/Hairline";
 import { hardware } from "@/lib/hardware";
 import { composePrintLayout } from "@/lib/layout";
-import type { QueueEntryWithGuest, Event } from "@/lib/types";
+import { renderTemplateStrip, composeDualPrintSheet } from "@/lib/template-builder";
+import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
 import QRCode from "qrcode";
 
 export type ShootStep = "choose" | "countdown" | "preview" | "output";
@@ -98,6 +99,7 @@ export default function ShootConsole() {
 
   // Step 4: Composed Print Layout & Output States
   const [composedImageUrl, setComposedImageUrl] = useState<string | null>(null);
+  const [activeTemplate, setActiveTemplate] = useState<PhotoTemplate | null>(null);
   const [printStatus, setPrintStatus] = useState<"idle" | "working" | "done" | "failed">("idle");
   const [printMessage, setPrintMessage] = useState<string | null>(null);
 
@@ -147,6 +149,21 @@ export default function ShootConsole() {
           const count = data.event.shots_per_guest ?? 3;
           setRetakesLeft(new Array(count).fill(limit));
           setSelectedPoses(new Array(count).fill(null));
+
+          // Fetch active template if configured for this event
+          try {
+            const tplRes = await fetch(`/api/templates?eventId=${data.event.id}&active=true`, {
+              cache: "no-store",
+            });
+            if (tplRes.ok) {
+              const tplData = await tplRes.json();
+              if (tplData.template && isMounted) {
+                setActiveTemplate(tplData.template);
+              }
+            }
+          } catch (tErr) {
+            console.warn("Could not load active template:", tErr);
+          }
         } else {
           setActiveEvent(null);
         }
@@ -573,8 +590,39 @@ export default function ShootConsole() {
     }
   };
 
+  // Builds the strip: uses custom event template if active, else falls back to default layout
+  const buildComposedStrip = async (): Promise<string> => {
+    const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
+    const shotUrls = currentList.map((s) => s.image);
+
+    if (activeTemplate && activeTemplate.slots && activeTemplate.slots.length > 0) {
+      try {
+        const customStrip = await renderTemplateStrip({
+          canvasWidth: activeTemplate.canvas_width,
+          canvasHeight: activeTemplate.canvas_height,
+          slots: activeTemplate.slots,
+          shots: shotUrls,
+          frameUrl: activeTemplate.frame_url,
+          backgroundUrl: activeTemplate.background_url,
+        });
+        return customStrip;
+      } catch (err) {
+        console.warn("Failed to render custom template strip, falling back to default:", err);
+      }
+    }
+
+    // Default layout fallback
+    return composePrintLayout({
+      shots: shotUrls,
+      layout: activeEvent?.print_layout || "STRIP",
+      eventName: activeEvent?.name || "Snap & Snack Event",
+      eventCode: activeEvent?.event_code || "SNAP",
+      dateStr: activeEvent?.start_time,
+    });
+  };
+
   // Keep & Next / Keep & Finish transition
-  const handleKeepAndNext = () => {
+  const handleKeepAndNext = async () => {
     // Ensure the currently kept shot is stored in Supabase
     const kept = capturedShots[reviewIndex] || shotsRef.current[reviewIndex];
     if (kept) {
@@ -585,14 +633,7 @@ export default function ShootConsole() {
       setReviewIndex((prev) => prev + 1);
     } else {
       // After last shot, show the composed summary screen and upload strip
-      const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
-      const composed = composePrintLayout({
-        shots: currentList.map((s) => s.image),
-        layout: activeEvent?.print_layout || "STRIP",
-        eventName: activeEvent?.name || "Snap & Snack Event",
-        eventCode: activeEvent?.event_code || "SNAP",
-        dateStr: activeEvent?.start_time,
-      });
+      const composed = await buildComposedStrip();
       setComposedImageUrl(composed);
       uploadComposedStrip(composed);
       setPreviewMode("summary");
@@ -600,17 +641,10 @@ export default function ShootConsole() {
   };
 
   // Step 4: Advance to Output
-  const handleLooksGood = () => {
+  const handleLooksGood = async () => {
     let composed = composedImageUrl;
     if (!composed) {
-      const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
-      composed = composePrintLayout({
-        shots: currentList.map((s) => s.image),
-        layout: activeEvent?.print_layout || "STRIP",
-        eventName: activeEvent?.name || "Snap & Snack Event",
-        eventCode: activeEvent?.event_code || "SNAP",
-        dateStr: activeEvent?.start_time,
-      });
+      composed = await buildComposedStrip();
       setComposedImageUrl(composed);
     }
     if (composed) {
@@ -646,8 +680,20 @@ export default function ShootConsole() {
         }
       }
 
-      // 2. Perform print via hardware gateway
-      const result = await hardware.print(composedImageUrl || undefined);
+      // 2. Prepare 2-up dual print sheet for 4x6 printing if STRIP layout
+      let printSheetUrl = composedImageUrl || undefined;
+      if (printSheetUrl && (activeEvent?.print_layout || "STRIP") === "STRIP") {
+        try {
+          if (!printSheetUrl.startsWith("data:image/svg")) {
+            printSheetUrl = await composeDualPrintSheet(printSheetUrl);
+          }
+        } catch (dualErr) {
+          console.warn("Failed to compose dual print sheet, using single strip:", dualErr);
+        }
+      }
+
+      // Perform print via hardware gateway
+      const result = await hardware.print(printSheetUrl);
 
       if (result.success) {
         // 3. Record successful print job
