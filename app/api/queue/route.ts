@@ -6,15 +6,25 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    const [event, queue] = await Promise.all([
-      db.getActiveEvent(),
-      db.getQueue(),
-    ]);
-    return NextResponse.json({ event, queue });
+    const { event, queue } = await db.getActiveEventWithQueue();
+    return NextResponse.json(
+      { event, queue },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error) {
+    console.error("GET /api/queue error:", error);
     return NextResponse.json(
       { error: "Failed to fetch queue data" },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
     );
   }
 }
@@ -22,7 +32,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, queueId, guestToken } = body;
+    const { action, queueId, guestToken, fullName, email } = body;
 
     let targetQueueId = queueId;
 
@@ -45,30 +55,43 @@ export async function POST(request: Request) {
       );
     }
 
-    let result;
     switch (action) {
+      case "addGuest": {
+        if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
+          return NextResponse.json(
+            { error: "fullName is required" },
+            { status: 400 }
+          );
+        }
+        await db.addGuest({
+          fullName: fullName.trim(),
+          email: typeof email === "string" ? email.trim().toLowerCase() : "",
+        });
+        break;
+      }
+
       case "start":
         if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
-        result = await db.startShoot(targetQueueId);
+        await db.startShoot(targetQueueId);
         break;
 
       case "remind":
         if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
-        result = await db.remindGuest(targetQueueId);
+        await db.remindGuest(targetQueueId);
         break;
 
       case "finish":
         if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
-        result = await db.finishShoot(targetQueueId);
+        await db.finishShoot(targetQueueId);
         break;
 
       case "cancel":
         if (!targetQueueId) return NextResponse.json({ error: "queueId or guestToken required" }, { status: 400 });
-        result = await db.cancelBooking(targetQueueId);
+        await db.cancelBooking(targetQueueId);
         break;
 
       case "callNext":
-        result = await db.callNext();
+        await db.callNext();
         break;
 
       default:
@@ -78,12 +101,33 @@ export async function POST(request: Request) {
         );
     }
 
-    return NextResponse.json({ success: true, ...result });
+    const { event, queue } = await db.getActiveEventWithQueue();
+    return NextResponse.json(
+      {
+        success: true,
+        event,
+        queue,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("Queue API Error:", error);
+    const statusCode = error.statusCode || 500;
     return NextResponse.json(
-      { error: "Failed to process queue action", details: error?.message || String(error) },
-      { status: 500 }
+      {
+        error: error.message || "Failed to process queue action",
+        details: error?.message || String(error),
+      },
+      {
+        status: statusCode,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
     );
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Users,
   Clock,
@@ -8,9 +8,12 @@ import {
   ArrowRight,
   ChevronRight,
   Wifi,
+  WifiOff,
+  UserPlus,
 } from "lucide-react";
 import type { Event, QueueEntryWithGuest } from "@/lib/types";
 import QueueCustomerModal from "./QueueCustomerModal";
+import AddGuestModal from "./AddGuestModal";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Tile } from "@/components/ui/Tile";
@@ -33,29 +36,111 @@ export default function QueueBoardView({
   const [selectedEntry, setSelectedEntry] = useState<QueueEntryWithGuest | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [showAddGuestModal, setShowAddGuestModal] = useState(false);
 
-  // Sync latest queue state and active event on mount and tab focus
-  useEffect(() => {
-    const refresh = () => {
-      fetch("/api/queue", { cache: "no-store" })
-        .then((res) => res.json())
-        .then((data) => {
-          if ("event" in data) {
-            setCurrentEvent(data.event || null);
-          }
-          if (data.queue) setQueue(data.queue);
-        })
-        .catch(() => {});
-    };
-    refresh();
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
-  }, []);
+  // Request counter, active fetch lock, and abort controller to avoid race conditions and overlap
+  const latestRequestIdRef = useRef<number>(0);
+  const isFetchingRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const showNotification = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
+
+  // ONE single fetch function for both the poll and post-action refresh
+  const fetchQueueData = useCallback(async (isActionRefresh = false) => {
+    // Prevent starting a new poll if one is already active (unless this is a priority action refresh)
+    if (isFetchingRef.current && !isActionRefresh) {
+      return;
+    }
+
+    // Cancel in-flight poll if an action refresh takes precedence
+    if (isActionRefresh && abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const reqId = ++latestRequestIdRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    isFetchingRef.current = true;
+
+    try {
+      const res = await fetch("/api/queue", {
+        cache: "no-store",
+        signal: controller.signal,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      });
+
+      // Ignore any response older than the latest request
+      if (reqId !== latestRequestIdRef.current) return;
+
+      if (!res.ok) {
+        setIsOnline(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (reqId !== latestRequestIdRef.current) return;
+
+      setIsOnline(true);
+      if ("event" in data) {
+        setCurrentEvent(data.event || null);
+      }
+      if (Array.isArray(data.queue)) {
+        setQueue(data.queue);
+      }
+    } catch (err: any) {
+      if (err.name === "AbortError") return;
+      if (reqId === latestRequestIdRef.current) {
+        setIsOnline(false);
+      }
+    } finally {
+      if (reqId === latestRequestIdRef.current) {
+        isFetchingRef.current = false;
+      }
+    }
+  }, []);
+
+  // Poll loop: waits for previous request to finish before scheduling the next (no overlapping polls)
+  useEffect(() => {
+    let isMounted = true;
+
+    const scheduleNextPoll = () => {
+      if (!isMounted) return;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = setTimeout(runPoll, 5000);
+    };
+
+    const runPoll = async () => {
+      if (!isMounted) return;
+      await fetchQueueData(false);
+      scheduleNextPoll();
+    };
+
+    // Run initial fetch and begin scheduled polling
+    runPoll();
+
+    const onFocus = () => {
+      if (!isFetchingRef.current) {
+        fetchQueueData(false);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      isMounted = false;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      window.removeEventListener("focus", onFocus);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [fetchQueueData]);
 
   const handleAction = async (
     action: "start" | "remind" | "finish" | "cancel",
@@ -71,22 +156,13 @@ export default function QueueBoardView({
       });
 
       if (!res.ok) {
-        throw new Error("Failed to perform action");
+        const errJson = await res.json().catch(() => ({}));
+        const message = errJson.error || errJson.details || "Failed to perform action";
+        throw new Error(message);
       }
 
-      const data = await res.json();
-      if ("event" in data) {
-        setCurrentEvent(data.event || null);
-      }
-      if (data.queue) {
-        setQueue(data.queue);
-      } else {
-        // Fallback refresh
-        const refreshRes = await fetch("/api/queue", { cache: "no-store" });
-        const refreshData = await refreshRes.json();
-        if ("event" in refreshData) setCurrentEvent(refreshData.event || null);
-        if (refreshData.queue) setQueue(refreshData.queue);
-      }
+      // Authoritative refresh using the ONE shared fetch function
+      await fetchQueueData(true);
 
       const actionLabels = {
         start: "started shooting",
@@ -95,9 +171,9 @@ export default function QueueBoardView({
         cancel: "booking cancelled",
       };
       showNotification(`Guest successfully ${actionLabels[action]}.`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      showNotification("Error: Action could not be completed.");
+      showNotification(err?.message || "Error: Action could not be completed.");
       throw err;
     } finally {
       setIsLoading(false);
@@ -109,6 +185,7 @@ export default function QueueBoardView({
       showNotification("No active event. Set one in Event Setup.");
       return;
     }
+
     setIsLoading(true);
     try {
       const res = await fetch("/api/queue", {
@@ -117,19 +194,54 @@ export default function QueueBoardView({
         body: JSON.stringify({ action: "callNext" }),
         cache: "no-store",
       });
-      const data = await res.json();
-      if ("event" in data) {
-        setCurrentEvent(data.event || null);
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const message = errJson.error || errJson.details || "Failed to advance queue";
+        throw new Error(message);
       }
-      if (data.message === "No guests waiting" || (data.queue && !data.promoted)) {
-        showNotification(data.message || "No guests waiting");
-      } else if (data.queue) {
-        setQueue(data.queue);
+
+      const data = await res.json();
+      if (data.message === "No guests waiting") {
+        showNotification(data.message);
+      } else {
+        // Authoritative refresh using the ONE shared fetch function
+        await fetchQueueData(true);
         showNotification("Advanced queue: Next guest called.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      showNotification("Failed to advance queue.");
+      showNotification(err?.message || "Failed to advance queue.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddGuest = async (fullName: string, email: string) => {
+    if (!currentEvent) {
+      throw new Error("No active event. Please set one in Event Setup.");
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "addGuest", fullName, email }),
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to add guest to queue");
+      }
+
+      // Authoritative refresh using the ONE shared fetch function
+      await fetchQueueData(true);
+      showNotification(`Added ${fullName} to queue.`);
+    } catch (err: any) {
+      console.error(err);
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -197,9 +309,21 @@ export default function QueueBoardView({
         }
         actions={
           <>
-            <StatusPill tone="ok" icon={Wifi} className="hidden sm:inline-flex">
-              Online
+            <StatusPill
+              tone={isOnline ? "ok" : "danger"}
+              icon={isOnline ? Wifi : WifiOff}
+              className="hidden sm:inline-flex"
+            >
+              {isOnline ? "Online" : "Offline"}
             </StatusPill>
+            <Pill
+              variant="secondary"
+              onClick={() => setShowAddGuestModal(true)}
+              disabled={isLoading || !currentEvent}
+            >
+              <UserPlus className="h-4 w-4" />
+              <span>Add Guest</span>
+            </Pill>
             <Pill
               variant="primary"
               onClick={handleCallNext}
@@ -349,6 +473,14 @@ export default function QueueBoardView({
         entry={activeSelectedEntry}
         onClose={() => setSelectedEntry(null)}
         onAction={handleAction}
+        isLoading={isLoading}
+      />
+
+      {/* Walk-in Add Guest Modal */}
+      <AddGuestModal
+        isOpen={showAddGuestModal}
+        onClose={() => setShowAddGuestModal(false)}
+        onAdd={handleAddGuest}
         isLoading={isLoading}
       />
     </div>

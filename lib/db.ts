@@ -29,7 +29,11 @@ export interface IDataStore {
   hasActiveQueueForEvent(eventId: string): Promise<boolean>;
 
   // Queue Operations
-  getQueue(): Promise<QueueEntryWithGuest[]>;
+  getActiveEventWithQueue(): Promise<{
+    event: Event | null;
+    queue: QueueEntryWithGuest[];
+  }>;
+  getQueue(eventId?: string): Promise<QueueEntryWithGuest[]>;
   callNext(): Promise<{
     completed: QueueEntryWithGuest | null;
     promoted: QueueEntryWithGuest | null;
@@ -78,21 +82,6 @@ export interface IDataStore {
     message?: string;
   }>;
 }
-
-const DEFAULT_EVENT: Event = {
-  id: "00000000-0000-0000-0000-000000000000",
-  name: "Snap & Snack Event",
-  event_type: "Corporate",
-  event_code: "SNAP26",
-  start_time: new Date().toISOString(),
-  end_time: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
-  avg_shoot_minutes: 5,
-  shots_per_guest: 3,
-  max_retakes: 2,
-  print_layout: "STRIP",
-  max_prints_per_guest: 1,
-  status: "ACTIVE",
-};
 
 class SupabaseDataStore implements IDataStore {
   // --- Event Operations ---
@@ -281,39 +270,112 @@ class SupabaseDataStore implements IDataStore {
 
   // --- Queue Operations ---
 
-  async getQueue(): Promise<QueueEntryWithGuest[]> {
+  async getActiveEventWithQueue(): Promise<{
+    event: Event | null;
+    queue: QueueEntryWithGuest[];
+  }> {
     try {
-      const currentEvent = await this.getCurrentEvent();
-      if (!currentEvent || !currentEvent.id) return [];
+      // Single joined query for active event, ordered queue entries, and associated guests
+      const { data, error } = await supabaseServer
+        .from("events")
+        .select(`
+          *,
+          queue_entries (
+            id,
+            event_id,
+            guest_id,
+            queue_number,
+            scheduled_shoot_time,
+            status,
+            created_at,
+            guest:guests (
+              id,
+              event_id,
+              full_name,
+              email,
+              guest_token,
+              created_at
+            )
+          )
+        `)
+        .eq("status", "ACTIVE")
+        .order("queue_number", { referencedTable: "queue_entries", ascending: true })
+        .maybeSingle();
+
+      if (error || !data) {
+        if (error) console.error("Supabase getActiveEventWithQueue error:", error);
+        return { event: null, queue: [] };
+      }
+
+      const { queue_entries, ...eventData } = data;
+
+      const queue: QueueEntryWithGuest[] = (queue_entries || []).map((entry: any) => ({
+        id: entry.id,
+        event_id: entry.event_id,
+        guest_id: entry.guest_id,
+        queue_number: entry.queue_number,
+        scheduled_shoot_time: entry.scheduled_shoot_time,
+        status: entry.status,
+        created_at: entry.created_at,
+        guest: entry.guest || {
+          id: entry.guest_id,
+          event_id: entry.event_id,
+          full_name: "Guest",
+          email: "",
+          guest_token: "",
+        },
+      }));
+
+      return {
+        event: eventData as Event,
+        queue,
+      };
+    } catch (err) {
+      console.error("Failed to query getActiveEventWithQueue from Supabase:", err);
+      return { event: null, queue: [] };
+    }
+  }
+
+  async getQueue(eventId?: string): Promise<QueueEntryWithGuest[]> {
+    try {
+      const targetEventId = eventId || (await this.getActiveEvent())?.id;
+      if (!targetEventId) return [];
 
       const { data: entries, error: qErr } = await supabaseServer
         .from("queue_entries")
-        .select("*")
-        .eq("event_id", currentEvent.id)
+        .select(`
+          id,
+          event_id,
+          guest_id,
+          queue_number,
+          scheduled_shoot_time,
+          status,
+          created_at,
+          guest:guests (
+            id,
+            event_id,
+            full_name,
+            email,
+            guest_token,
+            created_at
+          )
+        `)
+        .eq("event_id", targetEventId)
         .order("queue_number", { ascending: true });
 
       if (qErr || !entries || entries.length === 0) return [];
 
-      const guestIds = Array.from(new Set(entries.map((e) => e.guest_id).filter(Boolean)));
-      const { data: guests, error: gErr } = await supabaseServer
-        .from("guests")
-        .select("*")
-        .in("id", guestIds);
-
-      const guestMap = new Map((guests || []).map((g) => [g.id, g as Guest]));
-
-      return entries.map((e) => ({
-        id: e.id,
-        event_id: e.event_id,
-        guest_id: e.guest_id,
-        queue_number: e.queue_number,
-        scheduled_shoot_time: e.scheduled_shoot_time,
-        status: e.status,
-        created_at: e.created_at,
-        updated_at: e.updated_at,
-        guest: guestMap.get(e.guest_id) || {
-          id: e.guest_id,
-          event_id: e.event_id,
+      return entries.map((entry: any) => ({
+        id: entry.id,
+        event_id: entry.event_id,
+        guest_id: entry.guest_id,
+        queue_number: entry.queue_number,
+        scheduled_shoot_time: entry.scheduled_shoot_time,
+        status: entry.status,
+        created_at: entry.created_at,
+        guest: entry.guest || {
+          id: entry.guest_id,
+          event_id: entry.event_id,
           full_name: "Guest",
           email: "",
           guest_token: "",
@@ -331,7 +393,12 @@ class SupabaseDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
     message?: string;
   }> {
-    const queue = await this.getQueue();
+    const activeEvent = await this.getActiveEvent();
+    if (!activeEvent) {
+      return { completed: null, promoted: null, queue: [], message: "No active event" };
+    }
+
+    const queue = await this.getQueue(activeEvent.id);
     const result = pureCallNext(queue);
 
     if (result.message === "No guests waiting") {
@@ -343,25 +410,44 @@ class SupabaseDataStore implements IDataStore {
       };
     }
 
+    const nowIso = new Date().toISOString();
+
+    // End shoot session for completed guest
+    if (result.completedGuest) {
+      await supabaseServer
+        .from("shoot_sessions")
+        .update({ ended_at: nowIso })
+        .eq("queue_id", result.completedGuest.id)
+        .is("ended_at", null);
+    }
+
+    // Begin shoot session for promoted guest
+    if (result.promotedGuest) {
+      await supabaseServer
+        .from("shoot_sessions")
+        .insert({
+          queue_id: result.promotedGuest.id,
+          capture_type: "PHOTO",
+          started_at: nowIso,
+        });
+    }
+
     // Persist all changed records back to Supabase
-    const now = new Date().toISOString();
     for (const entry of result.updatedQueue) {
       const original = queue.find((q) => q.id === entry.id);
       if (!original || original.status !== entry.status) {
         await supabaseServer
           .from("queue_entries")
-          .update({
-            status: entry.status,
-            updated_at: now,
-          })
+          .update({ status: entry.status })
           .eq("id", entry.id);
       }
     }
 
+    const finalQueue = await this.getQueue(activeEvent.id);
     return {
       completed: result.completedGuest,
       promoted: result.promotedGuest,
-      queue: result.updatedQueue,
+      queue: finalQueue,
       message: result.message,
     };
   }
@@ -370,16 +456,12 @@ class SupabaseDataStore implements IDataStore {
     const queue = await this.getQueue();
     const updatedQueue = pureReorderWaitingQueue(queue, orderedWaitingIds);
 
-    const now = new Date().toISOString();
     for (const entry of updatedQueue) {
       const original = queue.find((q) => q.id === entry.id);
       if (!original || original.status !== entry.status) {
         await supabaseServer
           .from("queue_entries")
-          .update({
-            status: entry.status,
-            updated_at: now,
-          })
+          .update({ status: entry.status })
           .eq("id", entry.id);
       }
     }
@@ -392,21 +474,72 @@ class SupabaseDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const queue = await this.getQueue();
-    const result = pureStartShoot(queue, queueId);
-
-    if (result.startedEntry) {
-      await supabaseServer
-        .from("queue_entries")
-        .update({
-          status: "IN_PROGRESS",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", queueId);
+    const target = queue.find((q) => q.id === queueId);
+    if (!target) {
+      throw new Error("Guest queue entry not found");
     }
 
+    const nowIso = new Date().toISOString();
+
+    // If another guest was IN_PROGRESS, complete them first and end their shoot session
+    const currentShooting = queue.find((q) => q.status === "IN_PROGRESS" && q.id !== queueId);
+    if (currentShooting) {
+      await supabaseServer
+        .from("queue_entries")
+        .update({ status: "COMPLETED" })
+        .eq("id", currentShooting.id);
+
+      await supabaseServer
+        .from("shoot_sessions")
+        .update({ ended_at: nowIso })
+        .eq("queue_id", currentShooting.id)
+        .is("ended_at", null);
+    }
+
+    // 1. Mark target IN_PROGRESS in Supabase
+    const { error: startErr } = await supabaseServer
+      .from("queue_entries")
+      .update({ status: "IN_PROGRESS" })
+      .eq("id", queueId);
+
+    if (startErr) {
+      console.error("Supabase startShoot error:", startErr);
+      throw new Error(startErr.message);
+    }
+
+    // 2. Insert new shoot session
+    await supabaseServer
+      .from("shoot_sessions")
+      .insert({
+        queue_id: queueId,
+        capture_type: "PHOTO",
+        started_at: nowIso,
+      });
+
+    // 3. Recompute statuses
+    const updatedList = queue.map((q) => {
+      if (q.id === queueId) return { ...q, status: "IN_PROGRESS" as const };
+      if (currentShooting && q.id === currentShooting.id) return { ...q, status: "COMPLETED" as const };
+      return q;
+    });
+    const refreshed = refreshStatuses(updatedList);
+
+    for (const item of refreshed) {
+      const original = queue.find((q) => q.id === item.id);
+      if (original && original.status !== item.status) {
+        await supabaseServer
+          .from("queue_entries")
+          .update({ status: item.status })
+          .eq("id", item.id);
+      }
+    }
+
+    const finalQueue = await this.getQueue(target.event_id);
+    const started = finalQueue.find((q) => q.id === queueId) || null;
+
     return {
-      started: result.startedEntry,
-      queue: result.updatedQueue,
+      started,
+      queue: finalQueue,
     };
   }
 
@@ -415,21 +548,27 @@ class SupabaseDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const queue = await this.getQueue();
-    const result = pureRemindGuest(queue, queueId);
-
-    if (result.remindedEntry) {
-      await supabaseServer
-        .from("queue_entries")
-        .update({
-          status: "REMINDED",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", queueId);
+    const target = queue.find((q) => q.id === queueId);
+    if (!target) {
+      throw new Error("Guest queue entry not found");
     }
 
+    const { error: remindErr } = await supabaseServer
+      .from("queue_entries")
+      .update({ status: "REMINDED" })
+      .eq("id", queueId);
+
+    if (remindErr) {
+      console.error("Supabase remindGuest error:", remindErr);
+      throw new Error(remindErr.message);
+    }
+
+    const finalQueue = await this.getQueue(target.event_id);
+    const reminded = finalQueue.find((q) => q.id === queueId) || null;
+
     return {
-      reminded: result.remindedEntry,
-      queue: result.updatedQueue,
+      reminded,
+      queue: finalQueue,
     };
   }
 
@@ -438,21 +577,60 @@ class SupabaseDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const queue = await this.getQueue();
-    const result = pureFinishShoot(queue, queueId);
-
-    if (result.finishedEntry) {
-      await supabaseServer
-        .from("queue_entries")
-        .update({
-          status: "COMPLETED",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", queueId);
+    const target = queue.find((q) => q.id === queueId);
+    if (!target) {
+      throw new Error("Guest queue entry not found");
     }
 
+    // Finish is only valid for the IN_PROGRESS guest
+    if (target.status !== "IN_PROGRESS") {
+      const error: any = new Error("Call this guest first");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    // 1. Mark target COMPLETED in Supabase
+    const { error: updateErr } = await supabaseServer
+      .from("queue_entries")
+      .update({ status: "COMPLETED" })
+      .eq("id", queueId);
+
+    if (updateErr) {
+      console.error("Supabase finishShoot error:", updateErr);
+      throw new Error(updateErr.message);
+    }
+
+    // 2. End open shoot session
+    await supabaseServer
+      .from("shoot_sessions")
+      .update({ ended_at: nowIso })
+      .eq("queue_id", queueId)
+      .is("ended_at", null);
+
+    // 3. Re-run pure refreshStatuses and persist any resulting status changes
+    const updatedList = queue.map((q) =>
+      q.id === queueId ? { ...q, status: "COMPLETED" as const } : q
+    );
+    const refreshed = refreshStatuses(updatedList);
+
+    for (const item of refreshed) {
+      const original = queue.find((q) => q.id === item.id);
+      if (original && original.status !== item.status) {
+        await supabaseServer
+          .from("queue_entries")
+          .update({ status: item.status })
+          .eq("id", item.id);
+      }
+    }
+
+    const finalQueue = await this.getQueue(target.event_id);
+    const finished = finalQueue.find((q) => q.id === queueId) || null;
+
     return {
-      finished: result.finishedEntry,
-      queue: result.updatedQueue,
+      finished,
+      queue: finalQueue,
     };
   }
 
@@ -461,27 +639,53 @@ class SupabaseDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
   }> {
     const queue = await this.getQueue();
-    const result = pureCancelBooking(queue, queueId);
+    const target = queue.find((q) => q.id === queueId);
+    if (!target) {
+      throw new Error("Guest queue entry not found");
+    }
 
-    if (result.cancelledEntry) {
-      const now = new Date().toISOString();
-      for (const entry of result.updatedQueue) {
-        const original = queue.find((q) => q.id === entry.id);
-        if (!original || original.status !== entry.status) {
-          await supabaseServer
-            .from("queue_entries")
-            .update({
-              status: entry.status,
-              updated_at: now,
-            })
-            .eq("id", entry.id);
-        }
+    const nowIso = new Date().toISOString();
+
+    // 1. Mark target CANCELLED in Supabase (keeps history)
+    const { error: cancelErr } = await supabaseServer
+      .from("queue_entries")
+      .update({ status: "CANCELLED" })
+      .eq("id", queueId);
+
+    if (cancelErr) {
+      console.error("Supabase cancelBooking error:", cancelErr);
+      throw new Error(cancelErr.message);
+    }
+
+    // 2. End any open shoot session
+    await supabaseServer
+      .from("shoot_sessions")
+      .update({ ended_at: nowIso })
+      .eq("queue_id", queueId)
+      .is("ended_at", null);
+
+    // 3. Recompute statuses for remaining active queue
+    const updatedList = queue.map((q) =>
+      q.id === queueId ? { ...q, status: "CANCELLED" as const } : q
+    );
+    const refreshed = refreshStatuses(updatedList);
+
+    for (const item of refreshed) {
+      const original = queue.find((q) => q.id === item.id);
+      if (original && original.status !== item.status) {
+        await supabaseServer
+          .from("queue_entries")
+          .update({ status: item.status })
+          .eq("id", item.id);
       }
     }
 
+    const finalQueue = await this.getQueue(target.event_id);
+    const cancelled = finalQueue.find((q) => q.id === queueId) || null;
+
     return {
-      cancelled: result.cancelledEntry,
-      queue: result.updatedQueue,
+      cancelled,
+      queue: finalQueue,
     };
   }
 
@@ -516,7 +720,7 @@ class SupabaseDataStore implements IDataStore {
     }
 
     const newGuest = createdGuest as Guest;
-    const queue = await this.getQueue();
+    const queue = await this.getQueue(currentEvent.id);
 
     const highestQueueNumber = queue.reduce(
       (max, item) => (item.queue_number > max ? item.queue_number : max),
@@ -552,13 +756,12 @@ class SupabaseDataStore implements IDataStore {
     // Recompute statuses using pure refreshStatuses
     const refreshedQueue = refreshStatuses([...queue, newEntry]);
 
-    const now = new Date().toISOString();
     for (const entry of refreshedQueue) {
       if (entry.id === newEntry.id) {
         if (entry.status !== newEntry.status) {
           await supabaseServer
             .from("queue_entries")
-            .update({ status: entry.status, updated_at: now })
+            .update({ status: entry.status })
             .eq("id", entry.id);
         }
       } else {
@@ -566,7 +769,7 @@ class SupabaseDataStore implements IDataStore {
         if (original && original.status !== entry.status) {
           await supabaseServer
             .from("queue_entries")
-            .update({ status: entry.status, updated_at: now })
+            .update({ status: entry.status })
             .eq("id", entry.id);
         }
       }

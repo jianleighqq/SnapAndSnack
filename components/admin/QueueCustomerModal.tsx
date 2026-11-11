@@ -45,8 +45,8 @@ export default function QueueCustomerModal({
         setShowCancelConfirm(false);
       }
       onClose();
-    } catch {
-      setActionError("Action failed. Please try again.");
+    } catch (err: any) {
+      setActionError(err?.message || "Action failed. Please try again.");
     }
   };
 

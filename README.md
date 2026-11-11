@@ -26,14 +26,30 @@ Web-based photo booth and event queue management system. Guests register on thei
 | Component / Subsystem | Current Status | Notes |
 | :--- | :--- | :--- |
 | **Booth Shoot Console (`/booth/shoot`)** | 🟡 Live Mock Flow | 4-step capture flow, pose selection, Anton countdown, hardware capture & SELPHY mock print |
-| **Event Setup & Management** | 🟡 Mock Data / LocalStorage | Pure business logic in `/lib/events.ts`, store in `/lib/db.ts` |
+| **Event Setup & Management** | 🟢 Real (Supabase) | Supabase PostgreSQL backend with single ACTIVE event constraint |
 | **Hardware Diagnostics** | 🟡 Mock Interface | Behind `/lib/hardware.ts` with Sony USB & Canon SELPHY print counter simulation |
-| **Queue Engine** | 🟡 Mock Data | Pure business logic in `/lib/queue.ts`, seed data in `/mocks` |
-| **Intake API** | 🟡 Pending | Endpoint `/api/intake` with HMAC secret verification |
-| **Supabase DB & Realtime** | ⚪ Prepared | Interfaces ready in `/lib/db.ts` |
+| **Queue Engine** | 🟢 Real (Supabase) | Supabase PostgreSQL backend with pure status progression in `/lib/queue.ts` |
+| **Intake API (`POST /api/intake`)** | 🟢 Live Endpoint | HMAC-SHA256 signed Google Form webhook with replay protection and Resend email |
+| **Supabase DB & Realtime** | 🟢 Live (Cloud) | PostgreSQL tables with UUID generation and Realtime channels |
 | **Booth Camera Relay** | ⚪ Mock Interface | Local agent integration via `/lib/hardware.ts` |
 | **Canon SELPHY Print Relay**| ⚪ Mock Interface | Local print integration via `/lib/hardware.ts` |
 | **Google Drive Sync** | ⚪ Mock Interface | Sync worker via `/lib/drive` |
+
+---
+
+## Testing the Registration Intake API
+
+The intake webhook at `POST /api/intake` verifies HMAC-SHA256 signatures (`x-signature`) with unix timestamp headers (`x-timestamp`) using `INTAKE_WEBHOOK_SECRET`.
+
+To test registration locally without Google Forms/Apps Script:
+```powershell
+npx tsx scripts/test-intake.ts
+```
+
+Or specify custom event code, name, and email:
+```powershell
+npx tsx scripts/test-intake.ts SNAP26 "Taylor Swift" "taylor@example.com"
+```
 
 ---
 
