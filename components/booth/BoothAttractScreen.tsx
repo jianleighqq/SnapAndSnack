@@ -28,11 +28,11 @@ export default function BoothAttractScreen({
 
   // Sync with latest active event from API on mount/navigation
   useEffect(() => {
-    fetch("/api/events")
+    fetch("/api/events", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
-        if (data.activeEvent) {
-          setCurrentEvent(data.activeEvent);
+        if ("activeEvent" in data) {
+          setCurrentEvent(data.activeEvent || null);
         }
       })
       .catch(() => {});

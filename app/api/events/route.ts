@@ -3,12 +3,13 @@ import { db } from "@/lib/db";
 import { validateEventInput } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET() {
   try {
     const [events, activeEvent] = await Promise.all([
       db.getEvents(),
-      db.getCurrentEvent(),
+      db.getActiveEvent(),
     ]);
     return NextResponse.json({ events, activeEvent });
   } catch (error) {
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
           status: eventData.status || "SCHEDULED",
         });
         const events = await db.getEvents();
-        const activeEvent = await db.getCurrentEvent();
+        const activeEvent = await db.getActiveEvent();
         return NextResponse.json({ success: true, created, events, activeEvent });
       }
 
@@ -58,21 +59,21 @@ export async function POST(request: Request) {
         }
         const updated = await db.updateEvent(eventId, eventData);
         const events = await db.getEvents();
-        const activeEvent = await db.getCurrentEvent();
+        const activeEvent = await db.getActiveEvent();
         return NextResponse.json({ success: true, updated, events, activeEvent });
       }
 
       case "setActive": {
         if (!eventId) return NextResponse.json({ error: "eventId is required" }, { status: 400 });
         const events = await db.setActiveEvent(eventId);
-        const activeEvent = await db.getCurrentEvent();
+        const activeEvent = await db.getActiveEvent();
         return NextResponse.json({ success: true, events, activeEvent });
       }
 
       case "close": {
         if (!eventId) return NextResponse.json({ error: "eventId is required" }, { status: 400 });
         const events = await db.closeEvent(eventId);
-        const activeEvent = await db.getCurrentEvent();
+        const activeEvent = await db.getActiveEvent();
         return NextResponse.json({ success: true, events, activeEvent });
       }
 

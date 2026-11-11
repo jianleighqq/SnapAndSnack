@@ -28,6 +28,7 @@ export interface Event {
   shots_per_guest: number; // 1 to 4, default 3
   max_retakes: number; // default 2 per shot
   print_layout: PrintLayout; // SINGLE | STRIP | GRID
+  max_prints_per_guest: number; // 1 to 5, default 1
   status: EventStatus;
   created_at?: string;
 }

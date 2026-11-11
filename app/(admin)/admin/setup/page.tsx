@@ -4,11 +4,12 @@ import EventSetupView from "@/components/admin/setup/EventSetupView";
 import { PageHeader } from "@/components/ui/PageHeader";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function EventSetupPage() {
   const [events, activeEvent] = await Promise.all([
     db.getEvents().catch(() => []),
-    db.getCurrentEvent().catch(() => null),
+    db.getActiveEvent().catch(() => null),
   ]);
 
   return (

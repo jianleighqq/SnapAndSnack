@@ -10,6 +10,7 @@ export interface EventFormInput {
   shots_per_guest?: number;
   max_retakes?: number;
   print_layout?: PrintLayout;
+  max_prints_per_guest?: number;
 }
 
 export interface ValidationResult {

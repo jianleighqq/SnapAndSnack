@@ -108,6 +108,10 @@ export default function ShootConsole() {
   const [showRetakeAllPrompt, setShowRetakeAllPrompt] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
 
+  // Live Camera / Webcam State
+  const [cameraErrorBanner, setCameraErrorBanner] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
   // Keep selectedPoses length synchronized with event shots_per_guest
   useEffect(() => {
     setSelectedPoses((prev) => {
@@ -127,7 +131,7 @@ export default function ShootConsole() {
 
     async function initQueueSession() {
       try {
-        const res = await fetch("/api/queue");
+        const res = await fetch("/api/queue", { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to load queue");
         const data = await res.json();
         const queue: QueueEntryWithGuest[] = data.queue || [];
@@ -137,6 +141,8 @@ export default function ShootConsole() {
           const count = data.event.shots_per_guest ?? 3;
           setRetakesLeft(new Array(count).fill(limit));
           setSelectedPoses(new Array(count).fill(null));
+        } else {
+          setActiveEvent(null);
         }
 
         const inProgress = queue.find((q) => q.status === "IN_PROGRESS");
@@ -148,40 +154,9 @@ export default function ShootConsole() {
           return;
         }
 
-        const nextWaiting = queue.find((q) => q.status === "WAITING" || q.status === "REMINDED");
-        if (nextWaiting) {
-          const startRes = await fetch("/api/queue", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "start", queueId: nextWaiting.id }),
-          });
-          const startData = await startRes.json();
-          if (isMounted && startData.started) {
-            setActiveEntry(startData.started);
-            setIsLoadingGuest(false);
-            return;
-          }
-        }
-
+        // If no guest is IN_PROGRESS, set activeEntry to null
         if (isMounted) {
-          setActiveEntry({
-            id: "q_active_fallback",
-            event_id: data.event?.id || "evt_active",
-            guest_id: "gst_fallback",
-            queue_number: 1,
-            scheduled_shoot_time: null,
-            status: "IN_PROGRESS",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            guest: {
-              id: "gst_fallback",
-              event_id: data.event?.id || "evt_active",
-              full_name: "Walk-in Guest",
-              email: "guest@example.com",
-              guest_token: "tok_walkin",
-              created_at: new Date().toISOString(),
-            },
-          });
+          setActiveEntry(null);
           setIsLoadingGuest(false);
         }
       } catch (err) {
@@ -194,12 +169,53 @@ export default function ShootConsole() {
 
     initQueueSession();
 
+    // Ask for camera permission once when the console opens (if webcam mode is active)
+    if (hardware.initCamera) {
+      hardware.initCamera()
+        .then((status) => {
+          if (!isMounted) return;
+          if (status.status === "ERROR") {
+            const res = status.resolution?.toLowerCase() || "";
+            const mod = status.model?.toLowerCase() || "";
+            if (res.includes("permission denied") || mod.includes("permission denied")) {
+              setCameraErrorBanner("Camera permission denied. Please allow camera access in your browser settings to take photos.");
+            } else if (mod.includes("no camera")) {
+              setCameraErrorBanner("No camera found. Please connect a webcam.");
+            } else {
+              setCameraErrorBanner(`Camera error: ${status.model}`);
+            }
+          }
+        })
+        .catch((err) => {
+          if (isMounted) {
+            setCameraErrorBanner("Camera access error: " + (err?.message || String(err)));
+          }
+        });
+    }
+
     return () => {
       isMounted = false;
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       if (poseIntroTimeoutRef.current) clearTimeout(poseIntroTimeoutRef.current);
+      // Stop the camera stream when leaving the console so the camera light turns off
+      hardware.stopStream?.();
     };
   }, []);
+
+  // Connect live camera stream to the viewfinder video element during countdown
+  useEffect(() => {
+    let active = true;
+    if (step === "countdown" && videoRef.current && hardware.startStream) {
+      hardware.startStream(videoRef.current).catch((err) => {
+        if (active) {
+          console.warn("Unable to start live stream preview:", err);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [step]);
 
   // Tapping a pose tile fills the active slot and advances to the next empty slot
   const handleSelectPoseForActiveSlot = (poseId: string) => {
@@ -424,10 +440,35 @@ export default function ShootConsole() {
   // Step 4: Hardware Print action
   const handlePrint = async () => {
     if (printStatus === "working") return;
+
+    if (!activeEntry?.guest?.id) {
+      setPrintStatus("failed");
+      setPrintMessage("No active guest associated with this session.");
+      return;
+    }
+
     setPrintStatus("working");
     setPrintMessage(null);
 
     try {
+      // 1. Check and record print job via backend API
+      const recordRes = await fetch("/api/print", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          guestId: activeEntry.guest.id,
+          eventId: activeEntry.event_id,
+        }),
+      });
+
+      if (!recordRes.ok) {
+        const errJson = await recordRes.json().catch(() => ({}));
+        setPrintStatus("failed");
+        setPrintMessage(errJson.error || "Print limit reached for this session.");
+        return;
+      }
+
+      // 2. Perform print via hardware gateway
       const result = await hardware.print(composedImageUrl || undefined);
       if (result.success) {
         setPrintStatus("done");
@@ -454,6 +495,7 @@ export default function ShootConsole() {
 
   // Step 4: Mark COMPLETED and return to attract screen
   const handleFinishDone = async () => {
+    hardware.stopStream?.();
     setIsFinishing(true);
     try {
       if (activeEntry?.id) {
@@ -475,6 +517,7 @@ export default function ShootConsole() {
 
   // Cancel shoot: clears all state and slots, returns to attract screen "/"
   const handleConfirmCancel = () => {
+    hardware.stopStream?.();
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     if (poseIntroTimeoutRef.current) clearTimeout(poseIntroTimeoutRef.current);
 
@@ -502,7 +545,7 @@ export default function ShootConsole() {
 
   const guestNumber = activeEntry ? String(activeEntry.queue_number).padStart(2, "0") : "--";
   const guestName = activeEntry?.guest?.full_name || "Guest";
-  const guestToken = activeEntry?.guest?.guest_token || "sample_token";
+  const guestToken = activeEntry?.guest?.guest_token || "";
   const layoutLabel = activeEvent?.print_layout || "STRIP";
 
   // Retake metrics
@@ -511,6 +554,37 @@ export default function ShootConsole() {
   const canRetakeAll = retakesLeft.slice(0, totalShots).every((r) => r > 0);
 
   const CurrentPoseIcon = currentPoseInfo.icon;
+
+  if (!isLoadingGuest && !activeEntry) {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-paper text-ink p-6">
+        <Tile tone="surface" className="max-w-md w-full p-8 text-center space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-full bg-paper flex items-center justify-center text-accent">
+            <Camera className="w-7 h-7" />
+          </div>
+          <div>
+            <Label className="block mb-1">Booth Waiting</Label>
+            <h2 className="font-display text-3xl uppercase tracking-tight text-ink">
+              No guest is being called
+            </h2>
+          </div>
+          <p className="text-sm text-muted">
+            The operator has not called a guest to the booth yet. Use Call Next on the Queue Board to begin a session.
+          </p>
+          <div className="pt-2 flex justify-center">
+            <Pill
+              variant="primary"
+              size="lg"
+              onClick={() => router.push("/")}
+              className="uppercase tracking-wider font-mono text-xs"
+            >
+              Back to Home
+            </Pill>
+          </div>
+        </Tile>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex h-screen max-h-screen w-full max-w-full select-none flex-col justify-between overflow-hidden bg-paper text-ink p-4 sm:p-6 lg:p-8">
@@ -581,6 +655,30 @@ export default function ShootConsole() {
                 Choose a pose for each of your {totalShots} photos. Tap any slot to assign or reassign.
               </p>
             </div>
+
+            {/* Camera Permission / Device Error Banner */}
+            {cameraErrorBanner && (
+              <div className="w-full max-w-xl mx-auto flex items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-2.5 text-xs text-danger font-sans">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-danger" />
+                  <span>{cameraErrorBanner}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCameraErrorBanner(null);
+                    hardware.initCamera?.().then((st) => {
+                      if (st.status === "ERROR") {
+                        setCameraErrorBanner("Camera permission still denied. Please check your browser address bar settings.");
+                      }
+                    });
+                  }}
+                  className="interactive-secondary underline font-mono text-[10px] uppercase tracking-wider text-danger shrink-0"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             {/* N POSE SLOTS ROW (Always fits 1 row: 2 to 4 slots) */}
             <div className="space-y-1.5">
@@ -762,8 +860,18 @@ export default function ShootConsole() {
           <div className="mx-auto flex h-full max-h-[calc(100vh-140px)] w-full max-w-4xl flex-col items-center justify-between animate-fadeIn">
             {/* Viewfinder Tile */}
             <div className="relative flex aspect-[4/3] w-full max-h-[54vh] flex-col items-center justify-center overflow-hidden rounded-tile bg-[#181614] text-paper shadow-2xl border border-ink/10">
+              {/* LIVE CAMERA VIDEO (Mirrored preview only for natural mirror reflection) */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 h-full w-full object-cover -scale-x-100 z-0 pointer-events-none"
+              />
+              <div className="pointer-events-none absolute inset-0 bg-black/35 z-[1]" />
+
               {/* Corner Framing Marks */}
-              <div className="pointer-events-none absolute inset-4 sm:inset-6 flex flex-col justify-between">
+              <div className="pointer-events-none absolute inset-4 sm:inset-6 flex flex-col justify-between z-10">
                 <div className="flex justify-between">
                   <div className="h-5 w-5 sm:h-6 sm:w-6 border-l-2 border-t-2 border-paper/40" />
                   <div className="h-5 w-5 sm:h-6 sm:w-6 border-r-2 border-t-2 border-paper/40" />
@@ -775,7 +883,7 @@ export default function ShootConsole() {
               </div>
 
               {/* Viewfinder Header Metadata */}
-              <div className="absolute top-4 sm:top-6 left-4 sm:left-6 flex items-center gap-2">
+              <div className="absolute top-4 sm:top-6 left-4 sm:left-6 flex items-center gap-2 z-10">
                 <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
                 <Label className="text-paper/80 font-bold">
                   {retakeTargetIndex !== null
@@ -784,13 +892,13 @@ export default function ShootConsole() {
                 </Label>
               </div>
 
-              <div className="absolute top-4 sm:top-6 right-4 sm:right-6">
+              <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-10">
                 <Label className="text-paper/80">MODE: {captureType.toUpperCase()}</Label>
               </div>
 
               {/* PHASE 1: 3-SECOND POSE INTRO SCREEN BEFORE COUNTDOWN */}
               {countdownPhase === "intro" && !captureError && (
-                <div className="flex flex-col items-center justify-center text-center p-6 space-y-3 animate-scaleIn select-none">
+                <div className="relative z-10 flex flex-col items-center justify-center text-center p-6 space-y-3 animate-scaleIn select-none">
                   <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-accent/20 text-accent mb-1 border border-accent/40">
                     <CurrentPoseIcon className="h-8 w-8 sm:h-10 sm:w-10" />
                   </div>
@@ -818,7 +926,7 @@ export default function ShootConsole() {
 
               {/* PHASE 2: HUGE ANTON NUMERICAL COUNTDOWN (3, 2, 1) */}
               {countdownPhase === "counting" && countdownNumber !== null && !captureError && (
-                <div className="flex flex-col items-center justify-center">
+                <div className="relative z-10 flex flex-col items-center justify-center">
                   <div
                     key={countdownNumber}
                     className="font-display text-[clamp(90px,18vh,160px)] leading-none text-accent animate-scaleIn select-none"
@@ -833,7 +941,7 @@ export default function ShootConsole() {
 
               {/* Shutter Processing State */}
               {isCapturing && !captureError && (
-                <div className="flex flex-col items-center justify-center gap-3">
+                <div className="relative z-10 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="h-12 w-12 animate-spin text-accent" />
                   <Label className="text-paper/90 font-bold">CAPTURING FRAME...</Label>
                 </div>
@@ -841,7 +949,7 @@ export default function ShootConsole() {
 
               {/* Error UI: Hardware Capture Failed */}
               {captureError && (
-                <div className="flex max-w-md flex-col items-center justify-center p-6 text-center z-20">
+                <div className="relative z-20 flex max-w-md flex-col items-center justify-center p-6 text-center">
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger/20 text-danger">
                     <AlertTriangle className="h-6 w-6" />
                   </div>

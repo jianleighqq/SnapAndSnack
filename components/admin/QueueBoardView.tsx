@@ -28,17 +28,21 @@ export default function QueueBoardView({
   initialEvent,
   initialQueue,
 }: QueueBoardViewProps) {
+  const [currentEvent, setCurrentEvent] = useState<Event | null>(initialEvent);
   const [queue, setQueue] = useState<QueueEntryWithGuest[]>(initialQueue);
   const [selectedEntry, setSelectedEntry] = useState<QueueEntryWithGuest | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
-  // Sync latest queue state on mount and tab focus
+  // Sync latest queue state and active event on mount and tab focus
   useEffect(() => {
     const refresh = () => {
-      fetch("/api/queue")
+      fetch("/api/queue", { cache: "no-store" })
         .then((res) => res.json())
         .then((data) => {
+          if ("event" in data) {
+            setCurrentEvent(data.event || null);
+          }
           if (data.queue) setQueue(data.queue);
         })
         .catch(() => {});
@@ -63,6 +67,7 @@ export default function QueueBoardView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, queueId }),
+        cache: "no-store",
       });
 
       if (!res.ok) {
@@ -70,12 +75,16 @@ export default function QueueBoardView({
       }
 
       const data = await res.json();
+      if ("event" in data) {
+        setCurrentEvent(data.event || null);
+      }
       if (data.queue) {
         setQueue(data.queue);
       } else {
         // Fallback refresh
-        const refreshRes = await fetch("/api/queue");
+        const refreshRes = await fetch("/api/queue", { cache: "no-store" });
         const refreshData = await refreshRes.json();
+        if ("event" in refreshData) setCurrentEvent(refreshData.event || null);
         if (refreshData.queue) setQueue(refreshData.queue);
       }
 
@@ -96,14 +105,22 @@ export default function QueueBoardView({
   };
 
   const handleCallNext = async () => {
+    if (!currentEvent) {
+      showNotification("No active event. Set one in Event Setup.");
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetch("/api/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "callNext" }),
+        cache: "no-store",
       });
       const data = await res.json();
+      if ("event" in data) {
+        setCurrentEvent(data.event || null);
+      }
       if (data.message === "No guests waiting" || (data.queue && !data.promoted)) {
         showNotification(data.message || "No guests waiting");
       } else if (data.queue) {
@@ -164,13 +181,19 @@ export default function QueueBoardView({
         title="Queue"
         accent="Board"
         description={
-          <>
-            Active event:{" "}
-            <strong className="font-semibold text-ink">
-              {initialEvent?.name || "Summer Food & Photo Bash 2026"}
-            </strong>{" "}
-            <span className="font-mono text-xs">({initialEvent?.event_code || "SNAP26"})</span>
-          </>
+          currentEvent ? (
+            <>
+              Active event:{" "}
+              <strong className="font-semibold text-ink">
+                {currentEvent.name}
+              </strong>{" "}
+              <span className="font-mono text-xs">({currentEvent.event_code})</span>
+            </>
+          ) : (
+            <span className="text-muted italic">
+              No active event. Set one in Event Setup.
+            </span>
+          )
         }
         actions={
           <>

@@ -42,7 +42,7 @@ export default function GuestStatusView() {
   const fetchGuestData = async (activeToken?: string | null) => {
     try {
       const url = activeToken ? `/api/guest?token=${activeToken}` : "/api/guest";
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) {
         throw new Error("Guest or queue spot not found");
       }
@@ -50,7 +50,7 @@ export default function GuestStatusView() {
       setData(json);
 
       // Also fetch full queue to allow quick switching in dev mode
-      const qRes = await fetch("/api/queue");
+      const qRes = await fetch("/api/queue", { cache: "no-store" });
       if (qRes.ok) {
         const qData = await qRes.json();
         setAllEntries(qData.queue || []);

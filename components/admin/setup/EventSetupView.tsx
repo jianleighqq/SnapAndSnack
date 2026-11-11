@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sparkles, SlidersHorizontal, Image, Camera } from "lucide-react";
 import type { Event } from "@/lib/types";
 import EventsList from "./EventsList";
@@ -49,15 +49,17 @@ export default function EventSetupView({
   const selectedEvent = events.find((e) => e.id === selectedEventId) || events[0] || null;
   const activeEvent = events.find((e) => e.status === "ACTIVE") || null;
 
-  // Refetch / sync
-  const refreshEvents = async () => {
+  // Refetch / sync all events from the API route
+  const refreshEvents = async (preferredId?: string) => {
     try {
-      const res = await fetch("/api/events");
+      const res = await fetch("/api/events", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        if (data.events) {
+        if (data.events && Array.isArray(data.events)) {
           setEvents(data.events);
-          if (!data.events.some((e: Event) => e.id === selectedEventId) && data.events[0]) {
+          if (preferredId) {
+            setSelectedEventId(preferredId);
+          } else if (!data.events.some((e: Event) => e.id === selectedEventId) && data.events[0]) {
             setSelectedEventId(data.events[0].id);
           }
         }
@@ -66,6 +68,16 @@ export default function EventSetupView({
       console.error("Failed to refresh events:", err);
     }
   };
+
+  // On mount: clear legacy mock localStorage cache and load all events from API
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("snap_mock_events");
+      } catch {}
+    }
+    refreshEvents();
+  }, []);
 
   // Open Add modal
   const handleOpenAddModal = () => {
@@ -98,13 +110,10 @@ export default function EventSetupView({
     }
 
     const data = await res.json();
-    if (data.events) {
-      setEvents(data.events);
-      if (data.created) setSelectedEventId(data.created.id);
-      else if (data.updated) setSelectedEventId(data.updated.id);
-    } else {
-      await refreshEvents();
-    }
+    const newTargetId = data.created?.id || data.updated?.id || eventToEdit?.id;
+
+    // Always re-fetch the full list from the API route
+    await refreshEvents(newTargetId);
   };
 
   // Set as Active action with confirmation
@@ -129,8 +138,7 @@ export default function EventSetupView({
             body: JSON.stringify({ action: "setActive", eventId: targetEvent.id }),
           });
           if (res.ok) {
-            const data = await res.json();
-            if (data.events) setEvents(data.events);
+            await refreshEvents(targetEvent.id);
           }
         } finally {
           setIsProcessingAction(false);
@@ -175,8 +183,7 @@ export default function EventSetupView({
             body: JSON.stringify({ action: "close", eventId: targetEvent.id }),
           });
           if (res.ok) {
-            const data = await res.json();
-            if (data.events) setEvents(data.events);
+            await refreshEvents();
           }
         } finally {
           setIsProcessingAction(false);
@@ -206,11 +213,7 @@ export default function EventSetupView({
             body: JSON.stringify({ action: "delete", eventId: targetEvent.id }),
           });
           if (res.ok) {
-            const data = await res.json();
-            if (data.events) {
-              setEvents(data.events);
-              if (data.events[0]) setSelectedEventId(data.events[0].id);
-            }
+            await refreshEvents();
           }
         } finally {
           setIsProcessingAction(false);

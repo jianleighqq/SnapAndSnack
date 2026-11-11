@@ -3,6 +3,7 @@ import GuestStatusView from "@/components/guest/GuestStatusView";
 import { RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default function GuestDisplayPage() {
   return (

@@ -4,6 +4,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Tile } from "@/components/ui/Tile";
 import { Label } from "@/components/ui/Label";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default function OperatorShootPage() {
   return (
     <div className="space-y-8">

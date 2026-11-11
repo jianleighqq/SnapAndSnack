@@ -48,6 +48,7 @@ export default function EventModal({
   const [shotsPerGuest, setShotsPerGuest] = useState<number>(3);
   const [maxRetakes, setMaxRetakes] = useState<number>(2);
   const [printLayout, setPrintLayout] = useState<PrintLayout>("STRIP");
+  const [maxPrintsPerGuest, setMaxPrintsPerGuest] = useState<number>(1);
   const [eventCode, setEventCode] = useState("");
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -73,6 +74,7 @@ export default function EventModal({
       setShotsPerGuest(eventToEdit.shots_per_guest || 3);
       setMaxRetakes(eventToEdit.max_retakes ?? 2);
       setPrintLayout(eventToEdit.print_layout || "STRIP");
+      setMaxPrintsPerGuest(eventToEdit.max_prints_per_guest ?? 1);
       setEventCode(eventToEdit.event_code);
       setCodeManuallyEdited(true);
     } else {
@@ -89,6 +91,7 @@ export default function EventModal({
       setShotsPerGuest(3);
       setMaxRetakes(2);
       setPrintLayout("STRIP");
+      setMaxPrintsPerGuest(1);
       setEventCode("SNAP26");
       setCodeManuallyEdited(false);
     }
@@ -139,6 +142,7 @@ export default function EventModal({
       shots_per_guest: Number(shotsPerGuest),
       max_retakes: Number(maxRetakes),
       print_layout: printLayout,
+      max_prints_per_guest: Number(maxPrintsPerGuest || 1),
     };
 
     const validation = validateEventInput(inputData);
@@ -398,6 +402,36 @@ export default function EventModal({
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="pt-2 border-t border-ink/10">
+              <div className="flex items-center justify-between mb-2">
+                <Label as="label" className="text-ink">
+                  Prints per guest
+                </Label>
+                <span className="text-[10px] font-mono text-accent font-semibold uppercase">Rec: 1</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {[1, 2, 3, 4, 5].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setMaxPrintsPerGuest(num)}
+                    data-selected={maxPrintsPerGuest === num ? "true" : undefined}
+                    className={cn(
+                      "flex-1 min-h-[44px] rounded-full text-xs font-mono font-bold",
+                      maxPrintsPerGuest === num
+                        ? "is-selected bg-ink text-paper"
+                        : "interactive-secondary bg-paper text-ink border border-ink/15"
+                    )}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+              <span className="block mt-1 text-[11px] text-muted">
+                {maxPrintsPerGuest === 1 ? "1 print per session (default)" : `${maxPrintsPerGuest} prints allowed per guest`}
+              </span>
             </div>
           </div>
 

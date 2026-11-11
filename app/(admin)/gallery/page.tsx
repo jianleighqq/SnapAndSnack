@@ -3,6 +3,9 @@ import { Image as ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Tile } from "@/components/ui/Tile";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default function GalleryPage() {
   return (
     <div className="space-y-8">

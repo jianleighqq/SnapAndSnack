@@ -91,7 +91,10 @@ export function addGuestToQueue(
   const nextQueueNumber = highestQueueNumber + 1;
 
   const newEntry: QueueEntryWithGuest = {
-    id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id:
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : "00000000-0000-0000-0000-000000000001",
     event_id: guest.event_id,
     guest_id: guest.id,
     queue_number: nextQueueNumber,

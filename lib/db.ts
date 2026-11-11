@@ -1,5 +1,5 @@
 import type { Event, Guest, QueueEntryWithGuest } from "./types";
-import { mockEvents, mockEvent, mockGuests, mockQueue } from "../mocks/seed-data";
+import { supabaseServer } from "./supabase-server";
 import {
   callNext as pureCallNext,
   cancelBooking as pureCancelBooking,
@@ -10,23 +10,17 @@ import {
   finishShoot as pureFinishShoot,
   refreshStatuses,
 } from "./queue";
-import {
-  setActiveEventPure,
-  closeEventPure,
-  deleteEventPure,
-} from "./events";
-
-const STORAGE_KEY_EVENTS = "snap_mock_events";
 
 /**
  * Data Access Layer Interface
- * Allows swapping between Mock in-memory data and Supabase without changing any UI code.
+ * Reads and writes to Supabase database.
  */
 export interface IDataStore {
   // Event Operations
   getEvents(): Promise<Event[]>;
   getEventById(id: string): Promise<Event | null>;
-  getCurrentEvent(): Promise<Event>;
+  getActiveEvent(): Promise<Event | null>;
+  getCurrentEvent(): Promise<Event | null>;
   createEvent(event: Omit<Event, "id">): Promise<Event>;
   updateEvent(id: string, updates: Partial<Event>): Promise<Event>;
   setActiveEvent(id: string): Promise<Event[]>;
@@ -71,140 +65,264 @@ export interface IDataStore {
     queueEntry: QueueEntryWithGuest | null;
     positionInLine: number | null;
   } | null>;
+
+  // Print operations
+  countPrints(guestId: string): Promise<number>;
+  recordPrint(params: {
+    guestId: string;
+    eventId?: string;
+  }): Promise<{
+    success: boolean;
+    count: number;
+    allowed: boolean;
+    message?: string;
+  }>;
 }
 
-class MockDataStore implements IDataStore {
-  private events: Event[] = [...mockEvents];
-  private guests: Guest[] = [...mockGuests];
-  private queue: QueueEntryWithGuest[] = [...mockQueue];
+const DEFAULT_EVENT: Event = {
+  id: "00000000-0000-0000-0000-000000000000",
+  name: "Snap & Snack Event",
+  event_type: "Corporate",
+  event_code: "SNAP26",
+  start_time: new Date().toISOString(),
+  end_time: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
+  avg_shoot_minutes: 5,
+  shots_per_guest: 3,
+  max_retakes: 2,
+  print_layout: "STRIP",
+  max_prints_per_guest: 1,
+  status: "ACTIVE",
+};
 
-  constructor() {
-    this.hydrateFromStorage();
-  }
-
-  private hydrateFromStorage(): void {
-    if (typeof window !== "undefined") {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY_EVENTS);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            this.events = parsed;
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to load events from localStorage:", err);
-      }
-    }
-  }
-
-  private persistEvents(): void {
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(this.events));
-      } catch (err) {
-        console.warn("Failed to persist events to localStorage:", err);
-      }
-    }
-  }
-
+class SupabaseDataStore implements IDataStore {
   // --- Event Operations ---
 
   async getEvents(): Promise<Event[]> {
-    this.hydrateFromStorage();
-    return [...this.events];
+    try {
+      // Fetch all events from Supabase; order by created_at descending if available, else start_time
+      const { data, error } = await supabaseServer
+        .from("events")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        // Fallback to start_time ordering if created_at column is missing or errors
+        const fallback = await supabaseServer
+          .from("events")
+          .select("*")
+          .order("start_time", { ascending: false });
+
+        if (fallback.error) {
+          console.error("Supabase getEvents fallback error:", fallback.error);
+          return [];
+        }
+        return (fallback.data as Event[]) || [];
+      }
+      return (data as Event[]) || [];
+    } catch (err) {
+      console.error("Failed to query events from Supabase:", err);
+      return [];
+    }
   }
 
   async getEventById(id: string): Promise<Event | null> {
-    this.hydrateFromStorage();
-    const event = this.events.find((e) => e.id === id);
-    return event ? { ...event } : null;
-  }
+    try {
+      const { data, error } = await supabaseServer
+        .from("events")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
 
-  async getCurrentEvent(): Promise<Event> {
-    this.hydrateFromStorage();
-    const active = this.events.find((e) => e.status === "ACTIVE") || this.events[0] || mockEvent;
-    return {
-      ...active,
-      shots_per_guest: active.shots_per_guest || 3,
-      max_retakes: active.max_retakes ?? 2,
-      print_layout: active.print_layout || "STRIP",
-    };
-  }
-
-  async createEvent(data: Omit<Event, "id">): Promise<Event> {
-    this.hydrateFromStorage();
-    const newEvent: Event = {
-      ...data,
-      shots_per_guest: data.shots_per_guest ?? 3,
-      max_retakes: data.max_retakes ?? 2,
-      print_layout: data.print_layout ?? "STRIP",
-      id: `evt_${Date.now()}`,
-      created_at: new Date().toISOString(),
-    };
-
-    if (newEvent.status === "ACTIVE") {
-      this.events = setActiveEventPure(this.events, newEvent.id);
-      this.events.unshift(newEvent);
-    } else {
-      this.events.push(newEvent);
+      if (error || !data) return null;
+      return data as Event;
+    } catch (err) {
+      console.error("Failed to query event by ID:", err);
+      return null;
     }
+  }
 
-    this.persistEvents();
-    return { ...newEvent };
+  async getActiveEvent(): Promise<Event | null> {
+    try {
+      // ONE source of truth: directly query Supabase for status = 'ACTIVE' every time
+      const { data, error } = await supabaseServer
+        .from("events")
+        .select("*")
+        .eq("status", "ACTIVE")
+        .maybeSingle();
+
+      if (error) {
+        console.error("Supabase getActiveEvent error:", error);
+        return null;
+      }
+
+      return (data as Event) || null;
+    } catch (err) {
+      console.error("Failed to query getActiveEvent from Supabase:", err);
+      return null;
+    }
+  }
+
+  async getCurrentEvent(): Promise<Event | null> {
+    return this.getActiveEvent();
+  }
+
+  async createEvent(eventData: Omit<Event, "id">): Promise<Event> {
+    const insertPayload: Record<string, any> = {
+      name: eventData.name,
+      event_type: eventData.event_type,
+      event_code: eventData.event_code,
+      start_time: eventData.start_time,
+      end_time: eventData.end_time,
+      avg_shoot_minutes: eventData.avg_shoot_minutes,
+      shots_per_guest: eventData.shots_per_guest ?? 3,
+      max_retakes: eventData.max_retakes ?? 2,
+      print_layout: eventData.print_layout ?? "STRIP",
+      max_prints_per_guest: eventData.max_prints_per_guest ?? 1,
+      status: eventData.status ?? "SCHEDULED",
+    };
+
+    const { data, error } = await supabaseServer
+      .from("events")
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase createEvent error:", error);
+      throw new Error(error.message);
+    }
+    return data as Event;
   }
 
   async updateEvent(id: string, updates: Partial<Event>): Promise<Event> {
-    this.hydrateFromStorage();
-    const idx = this.events.findIndex((e) => e.id === id);
-    if (idx === -1) {
-      throw new Error(`Event ${id} not found`);
+    const { data, error } = await supabaseServer
+      .from("events")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase updateEvent error:", error);
+      throw new Error(error.message);
     }
-
-    const updated = { ...this.events[idx], ...updates };
-    this.events[idx] = updated;
-
-    if (updates.status === "ACTIVE") {
-      this.events = setActiveEventPure(this.events, id);
-    }
-
-    this.persistEvents();
-    return { ...this.events.find((e) => e.id === id)! };
+    return data as Event;
   }
 
   async setActiveEvent(id: string): Promise<Event[]> {
-    this.hydrateFromStorage();
-    this.events = setActiveEventPure(this.events, id);
-    this.persistEvents();
-    return [...this.events];
+    // 1. Deactivate any currently ACTIVE event first (set to SCHEDULED)
+    // Order matters because a unique partial index exists on status = 'ACTIVE'
+    const { error: demoteError } = await supabaseServer
+      .from("events")
+      .update({ status: "SCHEDULED" })
+      .eq("status", "ACTIVE");
+
+    if (demoteError) {
+      console.error("Supabase demote active events error:", demoteError);
+      throw new Error(demoteError.message);
+    }
+
+    // 2. Set the chosen event to ACTIVE
+    const { error: activateError } = await supabaseServer
+      .from("events")
+      .update({ status: "ACTIVE" })
+      .eq("id", id);
+
+    if (activateError) {
+      console.error("Supabase setActiveEvent error:", activateError);
+      throw new Error(activateError.message);
+    }
+
+    return this.getEvents();
   }
 
   async closeEvent(id: string): Promise<Event[]> {
-    this.hydrateFromStorage();
-    this.events = closeEventPure(this.events, id);
-    this.persistEvents();
-    return [...this.events];
+    const { error } = await supabaseServer
+      .from("events")
+      .update({ status: "CLOSED" })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Supabase closeEvent error:", error);
+      throw new Error(error.message);
+    }
+
+    return this.getEvents();
   }
 
   async deleteEvent(id: string): Promise<Event[]> {
-    this.hydrateFromStorage();
-    this.events = deleteEventPure(this.events, id);
-    this.persistEvents();
-    return [...this.events];
+    const { error } = await supabaseServer
+      .from("events")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Supabase deleteEvent error:", error);
+      throw new Error(error.message);
+    }
+
+    return this.getEvents();
   }
 
   async hasActiveQueueForEvent(eventId: string): Promise<boolean> {
-    return this.queue.some(
-      (q) =>
-        q.event_id === eventId &&
-        (q.status === "WAITING" || q.status === "REMINDED" || q.status === "IN_PROGRESS")
-    );
+    try {
+      const { count, error } = await supabaseServer
+        .from("queue_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .in("status", ["WAITING", "REMINDED", "IN_PROGRESS"]);
+
+      if (error) return false;
+      return (count || 0) > 0;
+    } catch {
+      return false;
+    }
   }
 
   // --- Queue Operations ---
 
   async getQueue(): Promise<QueueEntryWithGuest[]> {
-    return [...this.queue];
+    try {
+      const currentEvent = await this.getCurrentEvent();
+      if (!currentEvent || !currentEvent.id) return [];
+
+      const { data: entries, error: qErr } = await supabaseServer
+        .from("queue_entries")
+        .select("*")
+        .eq("event_id", currentEvent.id)
+        .order("queue_number", { ascending: true });
+
+      if (qErr || !entries || entries.length === 0) return [];
+
+      const guestIds = Array.from(new Set(entries.map((e) => e.guest_id).filter(Boolean)));
+      const { data: guests, error: gErr } = await supabaseServer
+        .from("guests")
+        .select("*")
+        .in("id", guestIds);
+
+      const guestMap = new Map((guests || []).map((g) => [g.id, g as Guest]));
+
+      return entries.map((e) => ({
+        id: e.id,
+        event_id: e.event_id,
+        guest_id: e.guest_id,
+        queue_number: e.queue_number,
+        scheduled_shoot_time: e.scheduled_shoot_time,
+        status: e.status,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+        guest: guestMap.get(e.guest_id) || {
+          id: e.guest_id,
+          event_id: e.event_id,
+          full_name: "Guest",
+          email: "",
+          guest_token: "",
+        },
+      }));
+    } catch (err) {
+      console.error("Supabase getQueue error:", err);
+      return [];
+    }
   }
 
   async callNext(): Promise<{
@@ -213,30 +331,82 @@ class MockDataStore implements IDataStore {
     queue: QueueEntryWithGuest[];
     message?: string;
   }> {
-    const result = pureCallNext(this.queue);
-    this.queue = [...result.updatedQueue];
+    const queue = await this.getQueue();
+    const result = pureCallNext(queue);
+
+    if (result.message === "No guests waiting") {
+      return {
+        completed: null,
+        promoted: null,
+        queue,
+        message: "No guests waiting",
+      };
+    }
+
+    // Persist all changed records back to Supabase
+    const now = new Date().toISOString();
+    for (const entry of result.updatedQueue) {
+      const original = queue.find((q) => q.id === entry.id);
+      if (!original || original.status !== entry.status) {
+        await supabaseServer
+          .from("queue_entries")
+          .update({
+            status: entry.status,
+            updated_at: now,
+          })
+          .eq("id", entry.id);
+      }
+    }
+
     return {
       completed: result.completedGuest,
       promoted: result.promotedGuest,
-      queue: [...this.queue],
+      queue: result.updatedQueue,
       message: result.message,
     };
   }
 
   async reorderQueue(orderedWaitingIds: string[]): Promise<QueueEntryWithGuest[]> {
-    this.queue = pureReorderWaitingQueue(this.queue, orderedWaitingIds);
-    return [...this.queue];
+    const queue = await this.getQueue();
+    const updatedQueue = pureReorderWaitingQueue(queue, orderedWaitingIds);
+
+    const now = new Date().toISOString();
+    for (const entry of updatedQueue) {
+      const original = queue.find((q) => q.id === entry.id);
+      if (!original || original.status !== entry.status) {
+        await supabaseServer
+          .from("queue_entries")
+          .update({
+            status: entry.status,
+            updated_at: now,
+          })
+          .eq("id", entry.id);
+      }
+    }
+
+    return updatedQueue;
   }
 
   async startShoot(queueId: string): Promise<{
     started: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
   }> {
-    const result = pureStartShoot(this.queue, queueId);
-    this.queue = [...result.updatedQueue];
+    const queue = await this.getQueue();
+    const result = pureStartShoot(queue, queueId);
+
+    if (result.startedEntry) {
+      await supabaseServer
+        .from("queue_entries")
+        .update({
+          status: "IN_PROGRESS",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", queueId);
+    }
+
     return {
       started: result.startedEntry,
-      queue: [...this.queue],
+      queue: result.updatedQueue,
     };
   }
 
@@ -244,11 +414,22 @@ class MockDataStore implements IDataStore {
     reminded: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
   }> {
-    const result = pureRemindGuest(this.queue, queueId);
-    this.queue = [...result.updatedQueue];
+    const queue = await this.getQueue();
+    const result = pureRemindGuest(queue, queueId);
+
+    if (result.remindedEntry) {
+      await supabaseServer
+        .from("queue_entries")
+        .update({
+          status: "REMINDED",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", queueId);
+    }
+
     return {
       reminded: result.remindedEntry,
-      queue: [...this.queue],
+      queue: result.updatedQueue,
     };
   }
 
@@ -256,11 +437,22 @@ class MockDataStore implements IDataStore {
     finished: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
   }> {
-    const result = pureFinishShoot(this.queue, queueId);
-    this.queue = [...result.updatedQueue];
+    const queue = await this.getQueue();
+    const result = pureFinishShoot(queue, queueId);
+
+    if (result.finishedEntry) {
+      await supabaseServer
+        .from("queue_entries")
+        .update({
+          status: "COMPLETED",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", queueId);
+    }
+
     return {
       finished: result.finishedEntry,
-      queue: [...this.queue],
+      queue: result.updatedQueue,
     };
   }
 
@@ -268,41 +460,123 @@ class MockDataStore implements IDataStore {
     cancelled: QueueEntryWithGuest | null;
     queue: QueueEntryWithGuest[];
   }> {
-    const result = pureCancelBooking(this.queue, queueId);
-    this.queue = [...result.updatedQueue];
+    const queue = await this.getQueue();
+    const result = pureCancelBooking(queue, queueId);
+
+    if (result.cancelledEntry) {
+      const now = new Date().toISOString();
+      for (const entry of result.updatedQueue) {
+        const original = queue.find((q) => q.id === entry.id);
+        if (!original || original.status !== entry.status) {
+          await supabaseServer
+            .from("queue_entries")
+            .update({
+              status: entry.status,
+              updated_at: now,
+            })
+            .eq("id", entry.id);
+        }
+      }
+    }
+
     return {
       cancelled: result.cancelledEntry,
-      queue: [...this.queue],
+      queue: result.updatedQueue,
     };
   }
 
-  async addGuest({
-    fullName,
-    email,
-  }: {
+  async addGuest(params: {
     fullName: string;
     email: string;
   }): Promise<{
     guest: Guest;
     queueEntry: QueueEntryWithGuest;
   }> {
-    const currentEvent = await this.getCurrentEvent();
-    const newGuest: Guest = {
-      id: `gst_${Date.now()}`,
-      event_id: currentEvent.id,
-      full_name: fullName,
-      email,
-      guest_token: `tok_${Math.random().toString(36).substring(2, 10)}`,
-      created_at: new Date().toISOString(),
-    };
-    this.guests.push(newGuest);
+    const currentEvent = await this.getActiveEvent();
+    if (!currentEvent) {
+      throw new Error("No active event found. Please activate an event in Event Setup first.");
+    }
 
-    const result = pureAddGuest(this.queue, newGuest);
-    this.queue = [...result.updatedQueue];
+    // Do NOT send id or guest_token on insert - Supabase generates them with defaults
+    const guestPayload = {
+      event_id: currentEvent.id,
+      full_name: params.fullName.trim(),
+      email: params.email.trim().toLowerCase(),
+    };
+
+    const { data: createdGuest, error: guestError } = await supabaseServer
+      .from("guests")
+      .insert(guestPayload)
+      .select()
+      .single();
+
+    if (guestError || !createdGuest) {
+      console.error("Supabase insert guest error:", guestError);
+      throw new Error(guestError?.message || "Failed to insert guest");
+    }
+
+    const newGuest = createdGuest as Guest;
+    const queue = await this.getQueue();
+
+    const highestQueueNumber = queue.reduce(
+      (max, item) => (item.queue_number > max ? item.queue_number : max),
+      0
+    );
+    const nextQueueNumber = highestQueueNumber + 1;
+
+    // Do NOT send id on insert - Supabase generates uuid primary key
+    const queuePayload = {
+      event_id: currentEvent.id,
+      guest_id: newGuest.id,
+      queue_number: nextQueueNumber,
+      scheduled_shoot_time: null,
+      status: "WAITING" as const,
+    };
+
+    const { data: createdQueueEntry, error: queueError } = await supabaseServer
+      .from("queue_entries")
+      .insert(queuePayload)
+      .select()
+      .single();
+
+    if (queueError || !createdQueueEntry) {
+      console.error("Supabase insert queue entry error:", queueError);
+      throw new Error(queueError?.message || "Failed to insert queue entry");
+    }
+
+    const newEntry: QueueEntryWithGuest = {
+      ...(createdQueueEntry as any),
+      guest: newGuest,
+    };
+
+    // Recompute statuses using pure refreshStatuses
+    const refreshedQueue = refreshStatuses([...queue, newEntry]);
+
+    const now = new Date().toISOString();
+    for (const entry of refreshedQueue) {
+      if (entry.id === newEntry.id) {
+        if (entry.status !== newEntry.status) {
+          await supabaseServer
+            .from("queue_entries")
+            .update({ status: entry.status, updated_at: now })
+            .eq("id", entry.id);
+        }
+      } else {
+        const original = queue.find((q) => q.id === entry.id);
+        if (original && original.status !== entry.status) {
+          await supabaseServer
+            .from("queue_entries")
+            .update({ status: entry.status, updated_at: now })
+            .eq("id", entry.id);
+        }
+      }
+    }
+
+    const finalNewEntry = refreshedQueue.find((e) => e.id === newEntry.id) || newEntry;
 
     return {
       guest: newGuest,
-      queueEntry: result.newEntry,
+      queueEntry: finalNewEntry,
     };
   }
 
@@ -311,27 +585,127 @@ class MockDataStore implements IDataStore {
     queueEntry: QueueEntryWithGuest | null;
     positionInLine: number | null;
   } | null> {
-    const guest = this.guests.find((g) => g.guest_token === token);
-    if (!guest) return null;
+    try {
+      const { data: guest, error } = await supabaseServer
+        .from("guests")
+        .select("*")
+        .eq("guest_token", token)
+        .maybeSingle();
 
-    const queueEntry = this.queue.find((q) => q.guest_id === guest.id) || null;
+      if (error || !guest) return null;
 
-    let positionInLine: number | null = null;
-    if (queueEntry && (queueEntry.status === "WAITING" || queueEntry.status === "REMINDED")) {
-      const activeWaiting = this.queue.filter(
-        (q) => q.status === "WAITING" || q.status === "REMINDED"
-      );
-      const idx = activeWaiting.findIndex((q) => q.id === queueEntry.id);
-      positionInLine = idx >= 0 ? idx + 1 : null;
+      const { data: entries } = await supabaseServer
+        .from("queue_entries")
+        .select("*")
+        .eq("guest_id", guest.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const rawEntry = entries?.[0] || null;
+      const queueEntry: QueueEntryWithGuest | null = rawEntry
+        ? { ...rawEntry, guest: guest as Guest }
+        : null;
+
+      let positionInLine: number | null = null;
+      if (queueEntry && (queueEntry.status === "WAITING" || queueEntry.status === "REMINDED")) {
+        const { count } = await supabaseServer
+          .from("queue_entries")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", guest.event_id)
+          .in("status", ["WAITING", "REMINDED"])
+          .lt("queue_number", queueEntry.queue_number);
+
+        positionInLine = (count || 0) + 1;
+      } else if (queueEntry && queueEntry.status === "IN_PROGRESS") {
+        positionInLine = 0;
+      }
+
+      return {
+        guest: guest as Guest,
+        queueEntry,
+        positionInLine,
+      };
+    } catch (err) {
+      console.error("Supabase getGuestByToken error:", err);
+      return null;
+    }
+  }
+
+  // --- Print Operations ---
+
+  async countPrints(guestId: string): Promise<number> {
+    try {
+      const { count, error } = await supabaseServer
+        .from("print_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("guest_id", guestId)
+        .eq("status", "PRINTED");
+
+      if (error) {
+        console.error("Supabase countPrints error:", error);
+        return 0;
+      }
+      return count || 0;
+    } catch (err) {
+      console.error("Failed to query countPrints:", err);
+      return 0;
+    }
+  }
+
+  async recordPrint(params: {
+    guestId: string;
+    eventId?: string;
+  }): Promise<{
+    success: boolean;
+    count: number;
+    allowed: boolean;
+    message?: string;
+  }> {
+    const currentEvent = await this.getActiveEvent();
+    const maxAllowed = currentEvent?.max_prints_per_guest ?? 1;
+    const printedCount = await this.countPrints(params.guestId);
+
+    if (printedCount >= maxAllowed) {
+      return {
+        success: false,
+        count: printedCount,
+        allowed: false,
+        message: `Print limit reached (${printedCount}/${maxAllowed} prints allowed per guest).`,
+      };
+    }
+
+    // Do NOT send id - Supabase generates uuid primary key with gen_random_uuid()
+    const { error } = await supabaseServer.from("print_jobs").insert({
+      event_id: params.eventId || currentEvent?.id,
+      guest_id: params.guestId,
+      status: "PRINTED",
+    });
+
+    if (error) {
+      console.error("Supabase recordPrint error:", error);
+      return {
+        success: false,
+        count: printedCount,
+        allowed: true,
+        message: "Failed to record print job in database.",
+      };
     }
 
     return {
-      guest,
-      queueEntry,
-      positionInLine,
+      success: true,
+      count: printedCount + 1,
+      allowed: true,
     };
   }
 }
 
-// Singleton instance for in-memory & local mock store
-export const db: IDataStore = new MockDataStore();
+// Single instance exported behind IDataStore interface
+export const db: IDataStore = new SupabaseDataStore();
+
+/**
+ * Single source of truth helper: queries Supabase for the active event (status = 'ACTIVE').
+ * Never uses module-level caches or fallback mock pointers.
+ */
+export async function getActiveEvent(): Promise<Event | null> {
+  return db.getActiveEvent();
+}

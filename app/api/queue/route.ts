@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET() {
   try {
     const [event, queue] = await Promise.all([
-      db.getCurrentEvent(),
+      db.getActiveEvent(),
       db.getQueue(),
     ]);
     return NextResponse.json({ event, queue });

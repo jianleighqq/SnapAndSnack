@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hardware } from "../lib/hardware";
+import { hardware, WebcamHardware, getHardwareMode } from "../lib/hardware";
 
 test("hardware.capture returns a valid image placeholder on success", async () => {
   hardware.setMockError("camera", false);
@@ -56,3 +56,34 @@ test("hardware.print fails when printer mock error is set", async () => {
   hardware.setMockError("printer", false);
 });
 
+test("getHardwareMode defaults to mock", () => {
+  assert.equal(getHardwareMode(), "mock");
+});
+
+test("WebcamHardware conforms to HardwareGateway interface and handles non-browser environments gracefully", async () => {
+  const webcam = new WebcamHardware();
+
+  // In Node.js environment (SSR / unit tests), mediaDevices is not present
+  const camStatus = await webcam.getCameraStatus();
+  assert.equal(camStatus.status, "OFFLINE");
+  assert.equal(camStatus.model, "Webcam");
+
+  const captureRes = await webcam.capture({ type: "Photo", pose: "Solo" });
+  assert.equal(captureRes.success, false);
+  assert.ok(captureRes.message?.includes("browser environments"));
+
+  const printRes = await webcam.print("data:image/png;base64,mock");
+  assert.equal(printRes.success, false);
+  assert.ok(printRes.message?.includes("browser environments"));
+
+  const printerStatus = await webcam.getPrinterStatus();
+  assert.equal(printerStatus.status, "READY");
+  assert.ok(printerStatus.paperLoaded > 0);
+
+  // Mock error overrides
+  webcam.setMockError("camera", true);
+  assert.equal(webcam.getMockErrors().camera, true);
+  const errCapture = await webcam.capture();
+  assert.equal(errCapture.success, false);
+  assert.ok(errCapture.message?.includes("mock error triggered"));
+});

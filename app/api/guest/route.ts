@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(request: Request) {
   try {
@@ -9,14 +10,7 @@ export async function GET(request: Request) {
     const token = searchParams.get("token");
 
     if (!token) {
-      // In development/preview mode, if no token is provided, return the first active waiting guest
-      const queue = await db.getQueue();
-      const firstEntry = queue.find((q) => q.status === "WAITING" || q.status === "REMINDED" || q.status === "IN_PROGRESS") || queue[0];
-      if (firstEntry) {
-        const guestData = await db.getGuestByToken(firstEntry.guest.guest_token);
-        return NextResponse.json({ ...guestData, isSample: true });
-      }
-      return NextResponse.json({ error: "Token is required" }, { status: 400 });
+      return NextResponse.json({ error: "Token is required" }, { status: 404 });
     }
 
     const guestData = await db.getGuestByToken(token);
