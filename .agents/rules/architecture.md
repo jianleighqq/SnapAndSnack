@@ -41,9 +41,7 @@ Three zones. Respect these boundaries when deciding where code goes.
   so they can be mocked.
 - Keep secrets (Supabase service key, Google service account, webhook secret) server-side only.
   Never expose them to client components.
-- Temporary exception: the booth Config Settings PIN is a mock value in NEXT_PUBLIC_BOOTH_PIN. It is
-  visible in the browser and is not real security. Replace it with real operator login before any
-  real event. Do not use NEXT_PUBLIC_ for any other secret.
+- Operator and booth screens (/admin/*, /booth/*) are protected by a server-verified OPERATOR_PIN and signed HMAC-SHA256 session cookie. No operator secrets or PINs are exposed to the client.
 - Hardware status and test actions go through the /lib/hardware interface (getCameraStatus, testCapture,
   getPrinterStatus, testPrint, getCloudStatus). Use the mock implementation until the relay agent exists.
 - Do not assume printer ink or paper levels can be read from the Canon SELPHY. Track prints per session and

@@ -16,15 +16,14 @@ export default function PinModal({ isOpen, onClose }: PinModalProps) {
   const router = useRouter();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Expected PIN from environment variable with fallback
-  const expectedPin = process.env.NEXT_PUBLIC_BOOTH_PIN || "1234";
 
   useEffect(() => {
     if (isOpen) {
       setPin("");
       setError(null);
+      setIsVerifying(false);
       // Small timeout ensures the modal is fully mounted before focusing
       const timer = setTimeout(() => {
         inputRef.current?.focus();
@@ -47,17 +46,37 @@ export default function PinModal({ isOpen, onClose }: PinModalProps) {
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!pin.trim() || isVerifying) return;
 
-    if (pin.trim() === expectedPin) {
-      router.push("/admin/queue");
+    setIsVerifying(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pin.trim() }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data.error || "Incorrect PIN. Please try again.");
+        setPin("");
+        inputRef.current?.focus();
+        return;
+      }
+
       onClose();
-    } else {
-      setError("Incorrect PIN. Please try again.");
-      setPin("");
-      inputRef.current?.focus();
+      router.push("/admin/queue");
+      router.refresh();
+    } catch {
+      setError("Network error communicating with authentication service.");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -132,8 +151,8 @@ export default function PinModal({ isOpen, onClose }: PinModalProps) {
             <Pill variant="secondary" size="lg" onClick={onClose} className="text-base">
               Cancel
             </Pill>
-            <Pill type="submit" variant="primary" size="lg" className="text-base">
-              Verify PIN
+            <Pill type="submit" variant="primary" size="lg" disabled={isVerifying} className="text-base">
+              {isVerifying ? "Verifying..." : "Verify PIN"}
             </Pill>
           </div>
         </form>
