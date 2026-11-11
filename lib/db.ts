@@ -70,16 +70,46 @@ export interface IDataStore {
     positionInLine: number | null;
   } | null>;
 
+  // Shoot session operations
+  getOrCreateShootSession(
+    queueId: string,
+    captureType?: string
+  ): Promise<{
+    id: string;
+    queue_id: string;
+    capture_type: string;
+    started_at: string;
+    ended_at: string | null;
+  }>;
+
   // Print operations
   countPrints(guestId: string): Promise<number>;
   recordPrint(params: {
     guestId: string;
     eventId?: string;
+    mediaId?: string;
+    status?: "PRINTED" | "FAILED";
   }): Promise<{
     success: boolean;
     count: number;
     allowed: boolean;
     message?: string;
+  }>;
+
+  // Gallery operations
+  saveToGallery(
+    paramsOrSessionId:
+      | {
+          sessionId?: string;
+          guestId?: string;
+          eventId?: string;
+        }
+      | string,
+    guestId?: string,
+    eventId?: string
+  ): Promise<{
+    success: boolean;
+    count: number;
   }>;
 }
 
@@ -834,14 +864,90 @@ class SupabaseDataStore implements IDataStore {
     }
   }
 
+  // --- Shoot Session Operations ---
+
+  async getOrCreateShootSession(
+    queueId: string,
+    captureType: string = "Photo"
+  ): Promise<{
+    id: string;
+    queue_id: string;
+    capture_type: string;
+    started_at: string;
+    ended_at: string | null;
+  }> {
+    // Reuse open session if one exists for that queue entry without ended_at
+    const { data: existing, error: findErr } = await supabaseServer
+      .from("shoot_sessions")
+      .select("*")
+      .eq("queue_id", queueId)
+      .is("ended_at", null)
+      .order("started_at", { ascending: false })
+      .limit(1);
+
+    if (!findErr && existing && existing.length > 0) {
+      return existing[0];
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: created, error: createErr } = await supabaseServer
+      .from("shoot_sessions")
+      .insert({
+        queue_id: queueId,
+        capture_type: captureType,
+        started_at: nowIso,
+      })
+      .select()
+      .single();
+
+    if (createErr || !created) {
+      console.error("Supabase getOrCreateShootSession error:", createErr);
+      throw new Error(createErr?.message || "Failed to create shoot session");
+    }
+
+    return created;
+  }
+
   // --- Print Operations ---
 
   async countPrints(guestId: string): Promise<number> {
     try {
+      const currentEvent = await this.getActiveEvent();
+      if (!currentEvent) return 0;
+
+      // 1. Find queue entries for this guest in the active event
+      const { data: queueEntries, error: qErr } = await supabaseServer
+        .from("queue_entries")
+        .select("id")
+        .eq("guest_id", guestId)
+        .eq("event_id", currentEvent.id);
+
+      if (qErr || !queueEntries || queueEntries.length === 0) return 0;
+      const queueIds = queueEntries.map((q) => q.id);
+
+      // 2. Find shoot sessions for these queue entries
+      const { data: sessions, error: sErr } = await supabaseServer
+        .from("shoot_sessions")
+        .select("id")
+        .in("queue_id", queueIds);
+
+      if (sErr || !sessions || sessions.length === 0) return 0;
+      const sessionIds = sessions.map((s) => s.id);
+
+      // 3. Find media assets for these sessions
+      const { data: media, error: mErr } = await supabaseServer
+        .from("media_assets")
+        .select("id")
+        .in("session_id", sessionIds);
+
+      if (mErr || !media || media.length === 0) return 0;
+      const mediaIds = media.map((m) => m.id);
+
+      // 4. Count print_jobs with status 'PRINTED'
       const { count, error } = await supabaseServer
         .from("print_jobs")
         .select("id", { count: "exact", head: true })
-        .eq("guest_id", guestId)
+        .in("media_id", mediaIds)
         .eq("status", "PRINTED");
 
       if (error) {
@@ -858,6 +964,8 @@ class SupabaseDataStore implements IDataStore {
   async recordPrint(params: {
     guestId: string;
     eventId?: string;
+    mediaId?: string;
+    status?: "PRINTED" | "FAILED";
   }): Promise<{
     success: boolean;
     count: number;
@@ -867,21 +975,66 @@ class SupabaseDataStore implements IDataStore {
     const currentEvent = await this.getActiveEvent();
     const maxAllowed = currentEvent?.max_prints_per_guest ?? 1;
     const printedCount = await this.countPrints(params.guestId);
+    const jobStatus = params.status || "PRINTED";
 
-    if (printedCount >= maxAllowed) {
+    // If attempting a PRINTED job and limit is reached, reject with 409 limit error
+    if (jobStatus === "PRINTED" && printedCount >= maxAllowed) {
       return {
         success: false,
         count: printedCount,
         allowed: false,
-        message: `Print limit reached (${printedCount}/${maxAllowed} prints allowed per guest).`,
+        message: "You have used your print",
       };
     }
 
-    // Do NOT send id - Supabase generates uuid primary key with gen_random_uuid()
+    let targetMediaId = params.mediaId;
+
+    // If mediaId not directly supplied, resolve the latest media asset for this guest
+    if (!targetMediaId) {
+      const eventId = params.eventId || currentEvent?.id;
+      const { data: queueRows } = await supabaseServer
+        .from("queue_entries")
+        .select("id")
+        .eq("guest_id", params.guestId)
+        .eq("event_id", eventId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const queueId = queueRows?.[0]?.id;
+      if (queueId) {
+        const { data: sessions } = await supabaseServer
+          .from("shoot_sessions")
+          .select("id")
+          .eq("queue_id", queueId)
+          .order("started_at", { ascending: false })
+          .limit(1);
+
+        const sessionId = sessions?.[0]?.id;
+        if (sessionId) {
+          const { data: assets } = await supabaseServer
+            .from("media_assets")
+            .select("id")
+            .eq("session_id", sessionId)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          targetMediaId = assets?.[0]?.id;
+        }
+      }
+    }
+
+    if (!targetMediaId) {
+      return {
+        success: false,
+        count: printedCount,
+        allowed: true,
+        message: "No media asset found to associate with print job.",
+      };
+    }
+
     const { error } = await supabaseServer.from("print_jobs").insert({
-      event_id: params.eventId || currentEvent?.id,
-      guest_id: params.guestId,
-      status: "PRINTED",
+      media_id: targetMediaId,
+      status: jobStatus,
+      printed_at: jobStatus === "PRINTED" ? new Date().toISOString() : null,
     });
 
     if (error) {
@@ -894,10 +1047,85 @@ class SupabaseDataStore implements IDataStore {
       };
     }
 
+    const newCount = jobStatus === "PRINTED" ? printedCount + 1 : printedCount;
     return {
       success: true,
-      count: printedCount + 1,
-      allowed: true,
+      count: newCount,
+      allowed: newCount < maxAllowed,
+    };
+  }
+
+  // --- Gallery Operations ---
+
+  async saveToGallery(
+    paramsOrSessionId:
+      | {
+          sessionId?: string;
+          guestId?: string;
+          eventId?: string;
+        }
+      | string,
+    optionalGuestId?: string,
+    optionalEventId?: string
+  ): Promise<{
+    success: boolean;
+    count: number;
+  }> {
+    const params =
+      typeof paramsOrSessionId === "string"
+        ? {
+            sessionId: paramsOrSessionId,
+            guestId: optionalGuestId,
+            eventId: optionalEventId,
+          }
+        : paramsOrSessionId || {};
+
+    const sessionIdsSet = new Set<string>();
+
+    if (params.sessionId) {
+      sessionIdsSet.add(params.sessionId);
+    }
+
+    if (params.guestId) {
+      const currentEvent = await this.getActiveEvent();
+      const eventId = params.eventId || currentEvent?.id;
+      const { data: queueRows } = await supabaseServer
+        .from("queue_entries")
+        .select("id")
+        .eq("guest_id", params.guestId)
+        .eq("event_id", eventId);
+
+      const queueIds = queueRows?.map((q) => q.id) || [];
+      if (queueIds.length > 0) {
+        const { data: sessionRows } = await supabaseServer
+          .from("shoot_sessions")
+          .select("id")
+          .in("queue_id", queueIds);
+
+        sessionRows?.forEach((s) => sessionIdsSet.add(s.id));
+      }
+    }
+
+    const sessionIds = Array.from(sessionIdsSet);
+    if (sessionIds.length === 0) {
+      return { success: false, count: 0 };
+    }
+
+    const { data, error } = await supabaseServer
+      .from("media_assets")
+      .update({ in_gallery: true })
+      .in("session_id", sessionIds)
+      .select("id");
+
+    if (error) {
+      console.error("Supabase saveToGallery error:", error);
+      throw new Error(error.message);
+    }
+
+    const count = data?.length || 0;
+    return {
+      success: count > 0,
+      count,
     };
   }
 }

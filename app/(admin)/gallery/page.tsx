@@ -1,32 +1,21 @@
-import React from "react";
-import { Image as ImageIcon } from "lucide-react";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Tile } from "@/components/ui/Tile";
+import React, { Suspense } from "react";
+import GuestGalleryView from "@/components/guest/GuestGalleryView";
+import { RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default function GalleryPage() {
   return (
-    <div className="space-y-8">
-      <PageHeader
-        label="Public Gallery"
-        title="Event"
-        accent="Gallery"
-        description="Live stream of guest photos, GIF downloads, and social sharing links."
-      />
-
-      <Tile tone="surface" className="p-10 text-center max-w-lg mx-auto my-12">
-        <div className="w-16 h-16 mx-auto mb-4 bg-paper rounded-full flex items-center justify-center text-accent">
-          <ImageIcon className="w-8 h-8" />
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen flex-col items-center justify-center p-6 font-mono text-sm">
+          <RefreshCw className="h-6 w-6 text-accent animate-spin mb-4" />
+          <p className="text-ink font-medium">Loading your gallery...</p>
         </div>
-        <h2 className="font-display text-2xl uppercase tracking-tight mb-2 text-ink">
-          Event Gallery Module
-        </h2>
-        <p className="text-sm text-muted">
-          Supabase Storage live photo wall and guest download portals will be connected in Phase 3.
-        </p>
-      </Tile>
-    </div>
+      }
+    >
+      <GuestGalleryView />
+    </Suspense>
   );
 }

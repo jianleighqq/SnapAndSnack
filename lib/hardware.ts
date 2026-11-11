@@ -5,6 +5,7 @@ export interface HardwareTestResult {
   message: string;
   timestamp: string;
   troubleshooting?: string;
+  imageUrl?: string;
 }
 
 export interface CameraStatus {
@@ -183,10 +184,13 @@ class MockHardwareService implements IHardwareService {
       };
     }
 
+    const captureRes = await this.capture({ type: "Photo", pose: "Test capture" });
+
     return {
       success: true,
       message: `Test frame captured successfully from ${camera} at ${now}. (mock)`,
       timestamp: now,
+      imageUrl: captureRes.imageUrl,
     };
   }
 
@@ -577,6 +581,7 @@ export class WebcamHardware implements IHardwareService {
       success: true,
       message: `Test frame captured successfully from webcam at ${now}.`,
       timestamp: now,
+      imageUrl: result.imageUrl,
     };
   }
 

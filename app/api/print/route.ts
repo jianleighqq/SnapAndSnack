@@ -34,22 +34,45 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { guestId, eventId } = body;
+    const { guestId, eventId, mediaId, status } = body;
 
     if (!guestId) {
       return NextResponse.json({ error: "guestId is required" }, { status: 400 });
     }
 
-    const result = await db.recordPrint({ guestId, eventId });
+    const currentEvent = await db.getActiveEvent();
+    const maxAllowed = currentEvent?.max_prints_per_guest ?? 1;
+    const currentCount = await db.countPrints(guestId);
 
-    if (!result.allowed) {
+    // If attempting to print or record PRINTED and limit already reached, return 409
+    if (status !== "FAILED" && currentCount >= maxAllowed) {
       return NextResponse.json(
         {
-          error: result.message || "Print limit reached",
-          count: result.count,
-          allowed: false,
+          error: "You have used your print",
+          count: currentCount,
+          maxAllowed,
+          canPrint: false,
         },
-        { status: 403 }
+        { status: 409 }
+      );
+    }
+
+    const result = await db.recordPrint({
+      guestId,
+      eventId,
+      mediaId,
+      status: status || "PRINTED",
+    });
+
+    if (!result.allowed && result.message === "You have used your print") {
+      return NextResponse.json(
+        {
+          error: "You have used your print",
+          count: result.count,
+          maxAllowed,
+          canPrint: false,
+        },
+        { status: 409 }
       );
     }
 

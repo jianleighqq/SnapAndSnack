@@ -355,6 +355,16 @@ export default function HardwareStatusPanel({
                 )}
                 <div>
                   <div className="font-semibold">{captureResult.message}</div>
+                  {captureResult.imageUrl && (
+                    <div className="mt-2.5 rounded-lg overflow-hidden border border-ink/10 bg-surface w-36 shadow-xs">
+                      {/* Preview only, not saved */}
+                      <img
+                        src={captureResult.imageUrl}
+                        alt="Test capture preview thumbnail"
+                        className="w-full h-auto object-cover"
+                      />
+                    </div>
+                  )}
                   {captureResult.troubleshooting && (
                     <div className="text-[11px] font-medium mt-1">
                       Troubleshooting: {captureResult.troubleshooting}

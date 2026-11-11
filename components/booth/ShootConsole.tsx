@@ -29,6 +29,7 @@ import { Hairline } from "@/components/ui/Hairline";
 import { hardware } from "@/lib/hardware";
 import { composePrintLayout } from "@/lib/layout";
 import type { QueueEntryWithGuest, Event } from "@/lib/types";
+import QRCode from "qrcode";
 
 export type ShootStep = "choose" | "countdown" | "preview" | "output";
 export type CaptureType = "Photo" | "GIF" | "Video";
@@ -102,6 +103,11 @@ export default function ShootConsole() {
 
   const [showQrTile, setShowQrTile] = useState(false);
   const [galleryStatus, setGalleryStatus] = useState<"idle" | "working" | "done" | "failed">("idle");
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const [stripMediaAssetId, setStripMediaAssetId] = useState<string | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [saveToastError, setSaveToastError] = useState<string | null>(null);
 
   // Confirmation Modals
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
@@ -151,6 +157,46 @@ export default function ShootConsole() {
             setActiveEntry(inProgress);
             setIsLoadingGuest(false);
           }
+
+          // 1. Get or create shoot session row for this queue entry
+          try {
+            const sessionRes = await fetch("/api/session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                queueId: inProgress.id,
+                captureType: "Photo",
+              }),
+            });
+            if (sessionRes.ok) {
+              const sessionData = await sessionRes.json();
+              if (sessionData.session?.id && isMounted) {
+                sessionIdRef.current = sessionData.session.id;
+                setSessionId(sessionData.session.id);
+              }
+            }
+          } catch (sErr) {
+            console.warn("Could not init shoot session:", sErr);
+          }
+
+          // 2. Enforce print limit state on mount / refresh (persisted on server)
+          if (inProgress.guest?.id) {
+            try {
+              const printRes = await fetch(`/api/print?guestId=${inProgress.guest.id}`, {
+                cache: "no-store",
+              });
+              if (printRes.ok) {
+                const printData = await printRes.json();
+                if (!printData.canPrint && isMounted) {
+                  setPrintStatus("done");
+                  setPrintMessage("Printed");
+                }
+              }
+            } catch (pErr) {
+              console.warn("Could not check print limit:", pErr);
+            }
+          }
+
           return;
         }
 
@@ -216,6 +262,125 @@ export default function ShootConsole() {
       active = false;
     };
   }, [step]);
+
+  // Generate real QR code when QR modal is requested
+  useEffect(() => {
+    if (showQrTile && activeEntry?.guest?.guest_token) {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        (typeof window !== "undefined" ? window.location.origin : "");
+      const galleryUrl = `${baseUrl}/gallery?token=${activeEntry.guest.guest_token}`;
+      QRCode.toDataURL(galleryUrl, { width: 300, margin: 1 })
+        .then((url) => setQrDataUrl(url))
+        .catch((err) => console.error("QR Code generation error:", err));
+    }
+  }, [showQrTile, activeEntry]);
+
+  // Helper to ensure a shoot session exists before uploading
+  const ensureSessionId = async (): Promise<string | null> => {
+    let currentId = sessionIdRef.current || sessionId;
+    if (currentId) return currentId;
+
+    if (activeEntry?.id) {
+      try {
+        const sessionRes = await fetch("/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            queueId: activeEntry.id,
+            captureType: "Photo",
+          }),
+        });
+        if (sessionRes.ok) {
+          const sData = await sessionRes.json();
+          currentId = sData.session?.id || null;
+          sessionIdRef.current = currentId;
+          setSessionId(currentId);
+          return currentId;
+        }
+      } catch (err) {
+        console.error("[ShootConsole] Could not ensure session ID:", err);
+      }
+    }
+    return null;
+  };
+
+  // Upload individual photo to Supabase storage 'photos' bucket & media_assets
+  const uploadShotPhoto = async (
+    shotIdx: number,
+    shot: CapturedShot,
+    retakeCnt?: number
+  ) => {
+    if (!activeEntry?.event_id || !activeEntry?.guest?.id) return;
+    try {
+      const resolvedSessionId = await ensureSessionId();
+
+      const res = await fetch("/api/media/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: shot.image,
+          eventId: activeEntry.event_id,
+          guestId: activeEntry.guest.id,
+          sessionId: resolvedSessionId,
+          queueId: activeEntry.id,
+          mediaType: "PHOTO",
+          shotNumber: shotIdx + 1,
+          retakeCount:
+            retakeCnt ??
+            Math.max(
+              0,
+              maxRetakesAllowed - (retakesLeft[shotIdx] ?? maxRetakesAllowed)
+            ),
+          poseId: shot.poseId,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        console.error("[ShootConsole] Shot upload failed:", errJson);
+        setSaveToastError("Could not save your photos, please try again");
+      }
+    } catch (err) {
+      console.error("[ShootConsole] Failed to upload shot to storage:", err);
+      setSaveToastError("Could not save your photos, please try again");
+    }
+  };
+
+  // Upload composed strip to Supabase storage 'photos' bucket & media_assets
+  const uploadComposedStrip = async (imageUrl: string) => {
+    if (!activeEntry?.event_id || !activeEntry?.guest?.id) return;
+    try {
+      const resolvedSessionId = await ensureSessionId();
+
+      const res = await fetch("/api/media/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: imageUrl,
+          eventId: activeEntry.event_id,
+          guestId: activeEntry.guest.id,
+          sessionId: resolvedSessionId,
+          queueId: activeEntry.id,
+          mediaType: "STRIP",
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.mediaAssetId) {
+          setStripMediaAssetId(data.mediaAssetId);
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.error("[ShootConsole] Strip upload failed:", errJson);
+        setSaveToastError("Could not save your photos, please try again");
+      }
+    } catch (err) {
+      console.error("[ShootConsole] Failed to upload composed strip to storage:", err);
+      setSaveToastError("Could not save your photos, please try again");
+    }
+  };
 
   // Tapping a pose tile fills the active slot and advances to the next empty slot
   const handleSelectPoseForActiveSlot = (poseId: string) => {
@@ -357,6 +522,9 @@ export default function ShootConsole() {
         const updated = [...shotsRef.current];
         setCapturedShots(updated);
 
+        // Upload kept retake to Supabase storage 'photos' bucket & media_assets
+        uploadShotPhoto(retakeIdx, { image: result.imageUrl!, poseId });
+
         // Decrement retakes for this shot
         setRetakesLeft((prev) => {
           const next = [...prev];
@@ -365,15 +533,15 @@ export default function ShootConsole() {
         });
 
         // Re-compose layout
-        setComposedImageUrl(
-          composePrintLayout({
-            shots: updated.map((s) => s.image),
-            layout: activeEvent?.print_layout || "STRIP",
-            eventName: activeEvent?.name || "Snap & Snack Event",
-            eventCode: activeEvent?.event_code || "SNAP",
-            dateStr: activeEvent?.start_time,
-          })
-        );
+        const composed = composePrintLayout({
+          shots: updated.map((s) => s.image),
+          layout: activeEvent?.print_layout || "STRIP",
+          eventName: activeEvent?.name || "Snap & Snack Event",
+          eventCode: activeEvent?.event_code || "SNAP",
+          dateStr: activeEvent?.start_time,
+        });
+        setComposedImageUrl(composed);
+        uploadComposedStrip(composed);
 
         setRetakeTargetIndex(null);
         setReviewIndex(retakeIdx);
@@ -384,6 +552,9 @@ export default function ShootConsole() {
         shotsRef.current[shotIdx] = { image: result.imageUrl!, poseId };
         const updated = [...shotsRef.current];
         setCapturedShots(updated);
+
+        // Upload shot to Supabase storage 'photos' bucket & media_assets
+        uploadShotPhoto(shotIdx, { image: result.imageUrl!, poseId });
 
         if (shotIdx + 1 < totalShots) {
           const nextIndex = shotIdx + 1;
@@ -404,10 +575,16 @@ export default function ShootConsole() {
 
   // Keep & Next / Keep & Finish transition
   const handleKeepAndNext = () => {
+    // Ensure the currently kept shot is stored in Supabase
+    const kept = capturedShots[reviewIndex] || shotsRef.current[reviewIndex];
+    if (kept) {
+      uploadShotPhoto(reviewIndex, kept);
+    }
+
     if (reviewIndex < totalShots - 1) {
       setReviewIndex((prev) => prev + 1);
     } else {
-      // After last shot, show the composed summary screen
+      // After last shot, show the composed summary screen and upload strip
       const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
       const composed = composePrintLayout({
         shots: currentList.map((s) => s.image),
@@ -417,15 +594,17 @@ export default function ShootConsole() {
         dateStr: activeEvent?.start_time,
       });
       setComposedImageUrl(composed);
+      uploadComposedStrip(composed);
       setPreviewMode("summary");
     }
   };
 
   // Step 4: Advance to Output
   const handleLooksGood = () => {
-    if (!composedImageUrl) {
+    let composed = composedImageUrl;
+    if (!composed) {
       const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
-      const composed = composePrintLayout({
+      composed = composePrintLayout({
         shots: currentList.map((s) => s.image),
         layout: activeEvent?.print_layout || "STRIP",
         eventName: activeEvent?.name || "Snap & Snack Event",
@@ -434,12 +613,15 @@ export default function ShootConsole() {
       });
       setComposedImageUrl(composed);
     }
+    if (composed) {
+      uploadComposedStrip(composed);
+    }
     setStep("output");
   };
 
   // Step 4: Hardware Print action
   const handlePrint = async () => {
-    if (printStatus === "working") return;
+    if (printStatus === "working" || printStatus === "done") return;
 
     if (!activeEntry?.guest?.id) {
       setPrintStatus("failed");
@@ -451,31 +633,58 @@ export default function ShootConsole() {
     setPrintMessage(null);
 
     try {
-      // 1. Check and record print job via backend API
-      const recordRes = await fetch("/api/print", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          guestId: activeEntry.guest.id,
-          eventId: activeEntry.event_id,
-        }),
+      // 1. Verify print limit on the server before hardware print
+      const checkRes = await fetch(`/api/print?guestId=${activeEntry.guest.id}`, {
+        cache: "no-store",
       });
-
-      if (!recordRes.ok) {
-        const errJson = await recordRes.json().catch(() => ({}));
-        setPrintStatus("failed");
-        setPrintMessage(errJson.error || "Print limit reached for this session.");
-        return;
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (!checkData.canPrint) {
+          setPrintStatus("done");
+          setPrintMessage("You have used your print");
+          return;
+        }
       }
 
       // 2. Perform print via hardware gateway
       const result = await hardware.print(composedImageUrl || undefined);
+
       if (result.success) {
+        // 3. Record successful print job
+        const recordRes = await fetch("/api/print", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            guestId: activeEntry.guest.id,
+            eventId: activeEntry.event_id,
+            mediaId: stripMediaAssetId || undefined,
+            status: "PRINTED",
+          }),
+        });
+
+        if (!recordRes.ok && recordRes.status === 409) {
+          setPrintStatus("done");
+          setPrintMessage("You have used your print");
+          return;
+        }
+
         setPrintStatus("done");
-        setPrintMessage(`Printed successfully (${result.paperLoaded} sheets remaining)`);
+        setPrintMessage("Printed");
       } else {
+        // 4. Record FAILED print job (does NOT count toward limit)
+        await fetch("/api/print", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            guestId: activeEntry.guest.id,
+            eventId: activeEntry.event_id,
+            mediaId: stripMediaAssetId || undefined,
+            status: "FAILED",
+          }),
+        });
+
         setPrintStatus("failed");
-        setPrintMessage(result.message);
+        setPrintMessage(result.message || "Print failed");
       }
     } catch (err: any) {
       setPrintStatus("failed");
@@ -485,12 +694,65 @@ export default function ShootConsole() {
 
   // Step 4: Save to Gallery action
   const handleSaveToGallery = async () => {
-    if (galleryStatus === "working") return;
+    if (galleryStatus === "working" || galleryStatus === "done") return;
     setGalleryStatus("working");
+    setSaveToastError(null);
 
-    setTimeout(() => {
+    try {
+      // 1. Ensure all captured shots are uploaded
+      const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
+      for (let i = 0; i < currentList.length; i++) {
+        const shot = currentList[i];
+        if (shot?.image) {
+          await uploadShotPhoto(i, shot);
+        }
+      }
+
+      // 2. Ensure composed strip is generated and uploaded
+      let currentStrip = composedImageUrl;
+      if (!currentStrip && currentList.length > 0) {
+        currentStrip = composePrintLayout({
+          shots: currentList.map((s) => s.image),
+          layout: activeEvent?.print_layout || "STRIP",
+          eventName: activeEvent?.name || "Snap & Snack Event",
+          eventCode: activeEvent?.event_code || "SNAP",
+          dateStr: activeEvent?.start_time,
+        });
+        setComposedImageUrl(currentStrip);
+      }
+
+      if (currentStrip) {
+        await uploadComposedStrip(currentStrip);
+      }
+
+      // 3. Mark in_gallery = true via backend API
+      const currentSessionId = await ensureSessionId();
+      const res = await fetch("/api/gallery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          guestId: activeEntry?.guest?.id,
+          eventId: activeEntry?.event_id,
+        }),
+      });
+
+      const resJson = await res.json().catch(() => ({}));
+
+      if (!res.ok || resJson.count === 0) {
+        console.error("[ShootConsole] Save to gallery returned error or 0 count:", resJson);
+        setGalleryStatus("failed");
+        setSaveToastError("Could not save your photos, please try again");
+        return;
+      }
+
       setGalleryStatus("done");
-    }, 700);
+      setSaveToastError(null);
+    } catch (err: any) {
+      console.error("[ShootConsole] Save to gallery exception:", err);
+      setGalleryStatus("failed");
+      setSaveToastError("Could not save your photos, please try again");
+    }
   };
 
   // Step 4: Mark COMPLETED and return to attract screen
@@ -591,6 +853,22 @@ export default function ShootConsole() {
       {/* FLASH OVERLAY */}
       {isFlashing && (
         <div className="fixed inset-0 z-50 pointer-events-none bg-white transition-opacity duration-200" />
+      )}
+
+      {/* SAVE / UPLOAD ERROR FLOATING TOAST */}
+      {saveToastError && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full bg-danger text-white text-xs font-mono shadow-xl animate-fadeIn">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{saveToastError}</span>
+          <button
+            type="button"
+            onClick={() => setSaveToastError(null)}
+            className="ml-2 hover:opacity-80 p-0.5 rounded-full"
+            aria-label="Dismiss error"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
 
       {/* TOP BAR: Mono label with guest info, step progress, and cancel button */}
@@ -1316,19 +1594,15 @@ export default function ShootConsole() {
                     )}
 
                     {printStatus === "done" && (
-                      <div className="space-y-1">
-                        <div className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-success uppercase">
-                          <Check className="h-3.5 w-3.5" /> Printed
-                        </div>
-                        <Pill
-                          variant="secondary"
-                          size="md"
-                          onClick={handlePrint}
-                          className="w-full text-xs font-mono min-h-[38px]"
-                        >
-                          Print Another
-                        </Pill>
-                      </div>
+                      <Pill
+                        variant="secondary"
+                        size="md"
+                        disabled
+                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px] opacity-80 cursor-not-allowed"
+                      >
+                        <Check className="h-4 w-4 text-success" />
+                        <span>Printed</span>
+                      </Pill>
                     )}
 
                     {printStatus === "failed" && (
@@ -1419,6 +1693,23 @@ export default function ShootConsole() {
                         <Check className="h-4 w-4" /> Saved
                       </div>
                     )}
+
+                    {galleryStatus === "failed" && (
+                      <div className="flex flex-col items-center gap-1.5 w-full">
+                        <div className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-mono font-bold text-danger uppercase">
+                          <AlertTriangle className="h-4 w-4" /> Save Failed
+                        </div>
+                        <Pill
+                          variant="secondary"
+                          size="md"
+                          onClick={handleSaveToGallery}
+                          className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px] text-danger border-danger/30 hover:bg-danger/10"
+                        >
+                          <CloudUpload className="h-4 w-4" />
+                          <span>Retry Save</span>
+                        </Pill>
+                      </div>
+                    )}
                   </div>
                 </Tile>
               </div>
@@ -1481,42 +1772,20 @@ export default function ShootConsole() {
               </button>
             </div>
             <div className="bg-white p-3 rounded-xl shadow-inner mb-2 border border-ink/10 flex justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" className="h-44 w-44">
-                <rect x="10" y="10" width="40" height="40" fill="#161513" rx="4" />
-                <rect x="20" y="20" width="20" height="20" fill="#ffffff" />
-                <rect x="25" y="25" width="10" height="10" fill="#161513" />
-
-                <rect x="110" y="10" width="40" height="40" fill="#161513" rx="4" />
-                <rect x="120" y="20" width="20" height="20" fill="#ffffff" />
-                <rect x="125" y="25" width="10" height="10" fill="#161513" />
-
-                <rect x="10" y="110" width="40" height="40" fill="#161513" rx="4" />
-                <rect x="20" y="120" width="20" height="20" fill="#ffffff" />
-                <rect x="25" y="125" width="10" height="10" fill="#161513" />
-
-                <rect x="60" y="20" width="10" height="10" fill="#161513" />
-                <rect x="80" y="20" width="10" height="20" fill="#161513" />
-                <rect x="60" y="40" width="20" height="10" fill="#161513" />
-                <rect x="90" y="40" width="10" height="10" fill="#161513" />
-
-                <rect x="20" y="60" width="20" height="10" fill="#161513" />
-                <rect x="50" y="60" width="10" height="10" fill="#161513" />
-                <rect x="70" y="60" width="20" height="20" fill="#e8541e" />
-                <rect x="100" y="60" width="20" height="10" fill="#161513" />
-                <rect x="130" y="60" width="10" height="20" fill="#161513" />
-
-                <rect x="30" y="80" width="10" height="20" fill="#161513" />
-                <rect x="60" y="90" width="10" height="10" fill="#161513" />
-                <rect x="100" y="80" width="20" height="20" fill="#161513" />
-
-                <rect x="60" y="120" width="20" height="10" fill="#161513" />
-                <rect x="90" y="110" width="10" height="20" fill="#161513" />
-                <rect x="110" y="120" width="20" height="20" fill="#161513" />
-                <rect x="140" y="110" width="10" height="20" fill="#161513" />
-              </svg>
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt="Gallery QR code"
+                  className="h-44 w-44 object-contain"
+                />
+              ) : (
+                <div className="h-44 w-44 flex items-center justify-center font-mono text-xs text-muted">
+                  Generating QR...
+                </div>
+              )}
             </div>
             <div className="font-mono text-[10px] text-muted break-all">
-              https://snapandsnack.com/g/{guestToken}
+              {`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")}/gallery?token=${guestToken}`}
             </div>
           </Tile>
         </div>

@@ -11,6 +11,10 @@ import { cn } from "@/components/ui/cn";
 export default function OperatorNav() {
   const pathname = usePathname();
 
+  if (!pathname.startsWith("/admin")) {
+    return null;
+  }
+
   const navItems = [
     {
       name: "Queue Board",
@@ -28,13 +32,8 @@ export default function OperatorNav() {
       icon: Camera,
     },
     {
-      name: "Guest Display",
-      href: "/guest",
-      icon: QrCode,
-    },
-    {
       name: "Gallery",
-      href: "/gallery",
+      href: "/admin/gallery",
       icon: ImageIcon,
     },
   ];
