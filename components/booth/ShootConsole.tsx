@@ -133,104 +133,103 @@ export default function ShootConsole() {
     setRetakesLeft(new Array(totalShots).fill(maxRetakesAllowed));
   }, [totalShots, maxRetakesAllowed]);
 
-  // 1. Fetch current queue & active event on mount
-  useEffect(() => {
-    let isMounted = true;
-
-    async function initQueueSession() {
-      try {
-        const res = await fetch("/api/queue", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to load queue");
-        const data = await res.json();
-        const queue: QueueEntryWithGuest[] = data.queue || [];
-        if (data.event) {
-          setActiveEvent(data.event);
-          const limit = data.event.max_retakes ?? 2;
-          const count = data.event.shots_per_guest ?? 3;
-          setRetakesLeft(new Array(count).fill(limit));
-          setSelectedPoses(new Array(count).fill(null));
-
-          // Fetch active template if configured for this event
-          try {
-            const tplRes = await fetch(`/api/templates?eventId=${data.event.id}&active=true`, {
-              cache: "no-store",
-            });
-            if (tplRes.ok) {
-              const tplData = await tplRes.json();
-              if (tplData.template && isMounted) {
-                setActiveTemplate(tplData.template);
-              }
-            }
-          } catch (tErr) {
-            console.warn("Could not load active template:", tErr);
-          }
-        } else {
-          setActiveEvent(null);
-        }
-
-        const inProgress = queue.find((q) => q.status === "IN_PROGRESS");
-        if (inProgress) {
-          if (isMounted) {
-            setActiveEntry(inProgress);
-            setIsLoadingGuest(false);
-          }
-
-          // 1. Get or create shoot session row for this queue entry
-          try {
-            const sessionRes = await fetch("/api/session", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                queueId: inProgress.id,
-                captureType: "Photo",
-              }),
-            });
-            if (sessionRes.ok) {
-              const sessionData = await sessionRes.json();
-              if (sessionData.session?.id && isMounted) {
-                sessionIdRef.current = sessionData.session.id;
-                setSessionId(sessionData.session.id);
-              }
-            }
-          } catch (sErr) {
-            console.warn("Could not init shoot session:", sErr);
-          }
-
-          // 2. Enforce print limit state on mount / refresh (persisted on server)
-          if (inProgress.guest?.id) {
-            try {
-              const printRes = await fetch(`/api/print?guestId=${inProgress.guest.id}`, {
-                cache: "no-store",
-              });
-              if (printRes.ok) {
-                const printData = await printRes.json();
-                if (!printData.canPrint && isMounted) {
-                  setPrintStatus("done");
-                  setPrintMessage("Printed");
-                }
-              }
-            } catch (pErr) {
-              console.warn("Could not check print limit:", pErr);
-            }
-          }
-
-          return;
-        }
-
-        // If no guest is IN_PROGRESS, set activeEntry to null
+  // 1. Fetch current booth guest & event from public scoped endpoint
+  const fetchCurrentBooth = async (isMounted = true) => {
+    try {
+      const res = await fetch("/api/booth/current", { cache: "no-store" });
+      if (res.status === 409 || !res.ok) {
         if (isMounted) {
           setActiveEntry(null);
           setIsLoadingGuest(false);
         }
-      } catch (err) {
-        console.error("Error setting up shoot guest:", err);
-        if (isMounted) {
-          setIsLoadingGuest(false);
+        return;
+      }
+
+      const data = await res.json();
+      if (!isMounted) return;
+
+      if (data.event) {
+        setActiveEvent(data.event);
+        const limit = data.event.max_retakes ?? 2;
+        const count = data.event.shots_per_guest ?? 3;
+        setRetakesLeft(new Array(count).fill(limit));
+        setSelectedPoses(new Array(count).fill(null));
+      }
+
+      if (data.template) {
+        setActiveTemplate(data.template);
+      }
+
+      if (data.guest) {
+        setActiveEntry({
+          id: "current-booth-guest",
+          event_id: data.event?.id || "",
+          guest_id: "current",
+          queue_number: data.guest.queue_number,
+          scheduled_shoot_time: null,
+          status: "IN_PROGRESS",
+          guest: {
+            id: "current",
+            event_id: data.event?.id || "",
+            full_name: data.guest.first_name,
+            email: "",
+            guest_token: "",
+          },
+        });
+        setIsLoadingGuest(false);
+      }
+
+      if (data.qrUrl) {
+        QRCode.toDataURL(data.qrUrl, { width: 300, margin: 1 })
+          .then((url) => {
+            if (isMounted) setQrDataUrl(url);
+          })
+          .catch((err) => console.error("QR Code generation error:", err));
+      }
+
+      // Initialize shoot session for this guest
+      try {
+        const sessionRes = await fetch("/api/booth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ captureType: "Photo" }),
+        });
+        if (sessionRes.ok) {
+          const sData = await sessionRes.json();
+          if (sData.session?.id && isMounted) {
+            sessionIdRef.current = sData.session.id;
+            setSessionId(sData.session.id);
+          }
         }
+      } catch (sErr) {
+        console.warn("Could not init booth shoot session:", sErr);
+      }
+
+      // Check print status
+      try {
+        const printRes = await fetch("/api/booth/print", { cache: "no-store" });
+        if (printRes.ok) {
+          const printData = await printRes.json();
+          if (!printData.canPrint && isMounted) {
+            setPrintStatus("done");
+            setPrintMessage("Printed");
+          }
+        }
+      } catch (pErr) {
+        console.warn("Could not check print limit:", pErr);
+      }
+    } catch (err) {
+      console.error("Error setting up shoot guest:", err);
+      if (isMounted) {
+        setActiveEntry(null);
+        setIsLoadingGuest(false);
       }
     }
+  };
 
-    initQueueSession();
+  useEffect(() => {
+    let isMounted = true;
+    fetchCurrentBooth(isMounted);
 
     // Ask for camera permission once when the console opens (if webcam mode is active)
     if (hardware.initCamera) {
@@ -280,67 +279,44 @@ export default function ShootConsole() {
     };
   }, [step]);
 
-  // Generate real QR code when QR modal is requested
-  useEffect(() => {
-    if (showQrTile && activeEntry?.guest?.guest_token) {
-      const baseUrl =
-        process.env.NEXT_PUBLIC_APP_URL ||
-        (typeof window !== "undefined" ? window.location.origin : "");
-      const galleryUrl = `${baseUrl}/gallery?token=${activeEntry.guest.guest_token}`;
-      QRCode.toDataURL(galleryUrl, { width: 300, margin: 1 })
-        .then((url) => setQrDataUrl(url))
-        .catch((err) => console.error("QR Code generation error:", err));
-    }
-  }, [showQrTile, activeEntry]);
-
   // Helper to ensure a shoot session exists before uploading
   const ensureSessionId = async (): Promise<string | null> => {
     let currentId = sessionIdRef.current || sessionId;
     if (currentId) return currentId;
 
-    if (activeEntry?.id) {
-      try {
-        const sessionRes = await fetch("/api/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            queueId: activeEntry.id,
-            captureType: "Photo",
-          }),
-        });
-        if (sessionRes.ok) {
-          const sData = await sessionRes.json();
-          currentId = sData.session?.id || null;
-          sessionIdRef.current = currentId;
-          setSessionId(currentId);
-          return currentId;
-        }
-      } catch (err) {
-        console.error("[ShootConsole] Could not ensure session ID:", err);
+    try {
+      const sessionRes = await fetch("/api/booth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captureType: "Photo" }),
+      });
+      if (sessionRes.ok) {
+        const sData = await sessionRes.json();
+        currentId = sData.session?.id || null;
+        sessionIdRef.current = currentId;
+        setSessionId(currentId);
+        return currentId;
       }
+    } catch (err) {
+      console.error("[ShootConsole] Could not ensure session ID:", err);
     }
     return null;
   };
 
-  // Upload individual photo to Supabase storage 'photos' bucket & media_assets
+  // Upload individual photo to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
   const uploadShotPhoto = async (
     shotIdx: number,
     shot: CapturedShot,
     retakeCnt?: number
   ) => {
-    if (!activeEntry?.event_id || !activeEntry?.guest?.id) return;
     try {
       const resolvedSessionId = await ensureSessionId();
 
-      const res = await fetch("/api/media/upload", {
+      const res = await fetch("/api/booth/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image: shot.image,
-          eventId: activeEntry.event_id,
-          guestId: activeEntry.guest.id,
-          sessionId: resolvedSessionId,
-          queueId: activeEntry.id,
           mediaType: "PHOTO",
           shotNumber: shotIdx + 1,
           retakeCount:
@@ -350,6 +326,7 @@ export default function ShootConsole() {
               maxRetakesAllowed - (retakesLeft[shotIdx] ?? maxRetakesAllowed)
             ),
           poseId: shot.poseId,
+          sessionId: resolvedSessionId,
         }),
       });
 
@@ -364,22 +341,18 @@ export default function ShootConsole() {
     }
   };
 
-  // Upload composed strip to Supabase storage 'photos' bucket & media_assets
+  // Upload composed strip to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
   const uploadComposedStrip = async (imageUrl: string) => {
-    if (!activeEntry?.event_id || !activeEntry?.guest?.id) return;
     try {
       const resolvedSessionId = await ensureSessionId();
 
-      const res = await fetch("/api/media/upload", {
+      const res = await fetch("/api/booth/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image: imageUrl,
-          eventId: activeEntry.event_id,
-          guestId: activeEntry.guest.id,
-          sessionId: resolvedSessionId,
-          queueId: activeEntry.id,
           mediaType: "STRIP",
+          sessionId: resolvedSessionId,
         }),
       });
 
@@ -668,9 +641,7 @@ export default function ShootConsole() {
 
     try {
       // 1. Verify print limit on the server before hardware print
-      const checkRes = await fetch(`/api/print?guestId=${activeEntry.guest.id}`, {
-        cache: "no-store",
-      });
+      const checkRes = await fetch("/api/booth/print", { cache: "no-store" });
       if (checkRes.ok) {
         const checkData = await checkRes.json();
         if (!checkData.canPrint) {
@@ -697,12 +668,10 @@ export default function ShootConsole() {
 
       if (result.success) {
         // 3. Record successful print job
-        const recordRes = await fetch("/api/print", {
+        const recordRes = await fetch("/api/booth/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            guestId: activeEntry.guest.id,
-            eventId: activeEntry.event_id,
             mediaId: stripMediaAssetId || undefined,
             status: "PRINTED",
           }),
@@ -718,12 +687,10 @@ export default function ShootConsole() {
         setPrintMessage("Printed");
       } else {
         // 4. Record FAILED print job (does NOT count toward limit)
-        await fetch("/api/print", {
+        await fetch("/api/booth/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            guestId: activeEntry.guest.id,
-            eventId: activeEntry.event_id,
             mediaId: stripMediaAssetId || undefined,
             status: "FAILED",
           }),
@@ -773,13 +740,11 @@ export default function ShootConsole() {
 
       // 3. Mark in_gallery = true via backend API
       const currentSessionId = await ensureSessionId();
-      const res = await fetch("/api/gallery", {
+      const res = await fetch("/api/booth/gallery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: currentSessionId,
-          guestId: activeEntry?.guest?.id,
-          eventId: activeEntry?.event_id,
         }),
       });
 
@@ -806,16 +771,10 @@ export default function ShootConsole() {
     hardware.stopStream?.();
     setIsFinishing(true);
     try {
-      if (activeEntry?.id) {
-        await fetch("/api/queue", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "finish",
-            queueId: activeEntry.id,
-          }),
-        });
-      }
+      await fetch("/api/booth/finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
     } catch (err) {
       console.warn("Could not mark completed in API:", err);
     } finally {

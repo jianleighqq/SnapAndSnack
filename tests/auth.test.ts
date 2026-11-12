@@ -4,6 +4,8 @@ import {
   verifyPin,
   createSessionToken,
   verifySessionToken,
+  getSafeRedirectTarget,
+  getSessionHours,
   SESSION_DURATION_MS,
 } from "../lib/auth";
 import {
@@ -85,5 +87,46 @@ test("Login rate limiter enforces max 5 failed attempts per IP and resets upon s
   const afterReset = checkLoginRateLimit(testIp);
   assert.strictEqual(afterReset.allowed, true);
   assert.strictEqual(afterReset.remaining, 5);
+});
+
+test("getSafeRedirectTarget prevents open redirects and allows relative paths", () => {
+  const fallback = "/admin/queue";
+
+  // Valid relative paths
+  assert.strictEqual(getSafeRedirectTarget("/booth", fallback), "/booth");
+  assert.strictEqual(getSafeRedirectTarget("/booth/shoot", fallback), "/booth/shoot");
+  assert.strictEqual(getSafeRedirectTarget("/admin/setup", fallback), "/admin/setup");
+
+  // Invalid or external targets (open redirect attempts)
+  assert.strictEqual(getSafeRedirectTarget("https://evil.com", fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget("http://evil.com", fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget("//evil.com", fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget("javascript:alert(1)", fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget("", fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget(null, fallback), fallback);
+  assert.strictEqual(getSafeRedirectTarget(undefined, fallback), fallback);
+});
+
+test("getSessionHours respects valid numbers and defaults to 12", () => {
+  const orig = process.env.SESSION_HOURS;
+  try {
+    delete process.env.SESSION_HOURS;
+    assert.strictEqual(getSessionHours(), 12);
+
+    process.env.SESSION_HOURS = "24";
+    assert.strictEqual(getSessionHours(), 24);
+
+    process.env.SESSION_HOURS = "invalid";
+    assert.strictEqual(getSessionHours(), 12);
+
+    process.env.SESSION_HOURS = "-5";
+    assert.strictEqual(getSessionHours(), 12);
+  } finally {
+    if (orig !== undefined) {
+      process.env.SESSION_HOURS = orig;
+    } else {
+      delete process.env.SESSION_HOURS;
+    }
+  }
 });
 

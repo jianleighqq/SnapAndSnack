@@ -18,19 +18,21 @@ export async function middleware(request: NextRequest) {
   // 2. Explicit public routes (never require PIN)
   if (
     pathname === "/" ||
+    pathname === "/booth" ||
+    pathname === "/booth/shoot" ||
     pathname === "/login" ||
     pathname.startsWith("/guest") ||
     pathname.startsWith("/gallery") ||
     pathname.startsWith("/api/guest") ||
     pathname.startsWith("/api/gallery") ||
-    pathname.startsWith("/api/intake")
+    pathname.startsWith("/api/intake") ||
+    pathname.startsWith("/api/booth")
   ) {
     return NextResponse.next();
   }
 
   // 3. Determine if the path is a protected page or protected API route
-  const isProtectedPage =
-    pathname.startsWith("/admin") || pathname.startsWith("/booth");
+  const isProtectedPage = pathname.startsWith("/admin");
 
   const isProtectedApi =
     pathname.startsWith("/api/events") ||

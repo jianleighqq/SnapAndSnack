@@ -1,6 +1,31 @@
 export const SESSION_COOKIE_NAME = "snap_session";
-export const SESSION_DURATION_MS = 12 * 60 * 60 * 1000; // 12 hours
-export const SESSION_DURATION_SECONDS = 12 * 60 * 60; // 43,200 seconds
+
+// Configurable session duration in hours (SESSION_HOURS env var, default 12)
+export function getSessionHours(): number {
+  const parsed = Number(process.env.SESSION_HOURS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
+}
+
+export const SESSION_DURATION_HOURS = getSessionHours();
+export const SESSION_DURATION_MS = SESSION_DURATION_HOURS * 60 * 60 * 1000;
+export const SESSION_DURATION_SECONDS = SESSION_DURATION_HOURS * 60 * 60;
+
+/**
+ * Validates a redirect target to prevent open redirects.
+ * Only allows relative paths starting with a single "/".
+ */
+export function getSafeRedirectTarget(
+  from: string | null | undefined,
+  fallback: string = "/admin/queue"
+): string {
+  if (!from || typeof from !== "string") return fallback;
+  const trimmed = from.trim();
+  // Must start with exactly one "/" and not "//" (protocol-relative URL)
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    return trimmed;
+  }
+  return fallback;
+}
 
 export interface SessionPayload {
   role: "operator";

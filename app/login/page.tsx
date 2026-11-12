@@ -7,6 +7,7 @@ import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Tile } from "@/components/ui/Tile";
 import { Hairline } from "@/components/ui/Hairline";
+import { getSafeRedirectTarget } from "@/lib/auth";
 
 function LoginForm() {
   const router = useRouter();
@@ -46,8 +47,8 @@ function LoginForm() {
         return;
       }
 
-      // Safe redirect: ensure `from` starts with "/" to prevent open redirects
-      const safeTarget = from.startsWith("/") ? from : "/admin/queue";
+      // Safe redirect: ensure `from` is a relative path starting with "/"
+      const safeTarget = getSafeRedirectTarget(from, "/admin/queue");
       router.push(safeTarget);
       router.refresh();
     } catch {

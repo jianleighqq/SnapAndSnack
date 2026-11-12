@@ -170,3 +170,14 @@ export function getClientIp(request: Request): string {
   return "127.0.0.1";
 }
 
+/**
+ * Rate limit for public booth operations: 120 requests per minute per IP.
+ */
+export function checkBoothRateLimit(ip: string): {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+} {
+  return checkRateLimit(`booth:${ip}`, 120, 60_000);
+}
+

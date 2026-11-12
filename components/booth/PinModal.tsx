@@ -10,9 +10,10 @@ import { Hairline } from "@/components/ui/Hairline";
 interface PinModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
-export default function PinModal({ isOpen, onClose }: PinModalProps) {
+export default function PinModal({ isOpen, onClose, onSuccess }: PinModalProps) {
   const router = useRouter();
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +72,12 @@ export default function PinModal({ isOpen, onClose }: PinModalProps) {
       }
 
       onClose();
-      router.push("/admin/queue");
-      router.refresh();
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push("/admin/queue");
+        router.refresh();
+      }
     } catch {
       setError("Network error communicating with authentication service.");
     } finally {

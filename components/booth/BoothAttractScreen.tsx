@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Lock } from "lucide-react";
-import PinModal from "./PinModal";
 import type { Event, QueueEntryWithGuest } from "@/lib/types";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
@@ -23,32 +22,16 @@ export default function BoothAttractScreen({
   event,
 }: BoothAttractScreenProps) {
   const router = useRouter();
-  const [currentEvent, setCurrentEvent] = useState<Event | null>(event);
-  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [currentEvent] = useState<Event | null>(event);
 
-  // Sync with latest active event from API on mount/navigation
-  useEffect(() => {
-    fetch("/api/events", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => {
-        if ("activeEvent" in data) {
-          setCurrentEvent(data.activeEvent || null);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Trigger navigation to shoot screen
+  // Trigger navigation directly to shoot screen
   const handleStartShooting = () => {
-    if (!isPinModalOpen) {
-      router.push("/booth/shoot");
-    }
+    router.push("/booth/shoot");
   };
 
-  // Keyboard navigation: Enter or Space starts shooting unless modal is open
+  // Keyboard navigation: Enter or Space starts shooting
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isPinModalOpen) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         router.push("/booth/shoot");
@@ -56,7 +39,7 @@ export default function BoothAttractScreen({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPinModalOpen, router]);
+  }, [router]);
 
   const eventTitle = currentEvent?.name?.trim() || "Snap & Snack Event";
 
@@ -84,7 +67,7 @@ export default function BoothAttractScreen({
             size="lg"
             onClick={(e) => {
               e.stopPropagation();
-              setIsPinModalOpen(true);
+              router.push("/login?from=/admin/queue");
             }}
             className="px-6 text-sm"
             aria-label="Open Operator Config Settings"
@@ -161,12 +144,6 @@ export default function BoothAttractScreen({
         <Hairline />
         <Ticker className="pt-4" items={["Snap", "Smile", "Snack", "Repeat"]} />
       </footer>
-
-      {/* PIN Verification Modal */}
-      <PinModal
-        isOpen={isPinModalOpen}
-        onClose={() => setIsPinModalOpen(false)}
-      />
     </div>
   );
 }
