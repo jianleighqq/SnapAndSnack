@@ -285,6 +285,7 @@ export default function EventSetupView({
           {currentTab === "setup" ? (
             <HardwareStatusPanel
               selectedEvent={selectedEvent}
+              activeEvent={activeEvent}
               onEditEvent={handleOpenEditModal}
               onSetActive={handleSetActive}
               onCloseEvent={handleCloseEvent}

@@ -72,13 +72,6 @@ export async function POST(request: Request) {
 
     const { event_code, full_name, email } = body || {};
 
-    if (!event_code || typeof event_code !== "string" || !event_code.trim()) {
-      return NextResponse.json(
-        { error: "event_code is required" },
-        { status: 400 }
-      );
-    }
-
     const trimmedName = typeof full_name === "string" ? full_name.trim() : "";
     if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 100) {
       return NextResponse.json(
@@ -96,19 +89,40 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Find event by event_code
-    const cleanEventCode = event_code.trim().toUpperCase();
-    const { data: event, error: eventErr } = await supabaseServer
-      .from("events")
-      .select("*")
-      .eq("event_code", cleanEventCode)
-      .maybeSingle();
+    // 3. Resolve target event: either via explicit event_code or via the currently ACTIVE event
+    let event: any = null;
+    const cleanEventCode = typeof event_code === "string" ? event_code.trim().toUpperCase() : "";
 
-    if (eventErr || !event) {
-      return NextResponse.json(
-        { error: "Event not found" },
-        { status: 404 }
-      );
+    if (cleanEventCode) {
+      // Look up event by event_code
+      const { data, error: eventErr } = await supabaseServer
+        .from("events")
+        .select("*")
+        .eq("event_code", cleanEventCode)
+        .maybeSingle();
+
+      if (eventErr || !data) {
+        return NextResponse.json(
+          { error: "Event not found" },
+          { status: 404 }
+        );
+      }
+      event = data;
+    } else {
+      // No event_code supplied: use the single event with status = 'ACTIVE'
+      const { data: activeEvent, error: activeErr } = await supabaseServer
+        .from("events")
+        .select("*")
+        .eq("status", "ACTIVE")
+        .maybeSingle();
+
+      if (activeErr || !activeEvent) {
+        return NextResponse.json(
+          { error: "Registration is not open" },
+          { status: 409 }
+        );
+      }
+      event = activeEvent;
     }
 
     if (event.status === "CLOSED") {

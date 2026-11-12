@@ -15,6 +15,8 @@ import {
   Plus,
   Minus,
   Info,
+  ClipboardList,
+  Copy,
 } from "lucide-react";
 import type { Event } from "@/lib/types";
 import {
@@ -32,6 +34,7 @@ import { cn } from "@/components/ui/cn";
 
 interface HardwareStatusPanelProps {
   selectedEvent: Event | null;
+  activeEvent?: Event | null;
   onEditEvent: (event: Event) => void;
   onSetActive: (event: Event) => void;
   onCloseEvent: (event: Event) => void;
@@ -40,6 +43,7 @@ interface HardwareStatusPanelProps {
 
 export default function HardwareStatusPanel({
   selectedEvent,
+  activeEvent,
   onEditEvent,
   onSetActive,
   onCloseEvent,
@@ -50,6 +54,17 @@ export default function HardwareStatusPanel({
   const [printerStatus, setPrinterStatus] = useState<PrinterStatus | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
   const [selectedCameraModel, setSelectedCameraModel] = useState("Sony a7 IV");
+
+  // Registration link copy state
+  const [isCopied, setIsCopied] = useState(false);
+  const formUrl = process.env.NEXT_PUBLIC_REGISTRATION_FORM_URL || "";
+
+  const handleCopyLink = () => {
+    if (!formUrl) return;
+    navigator.clipboard.writeText(formUrl);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
 
   // Loading states
   const [isCapturing, setIsCapturing] = useState(false);
@@ -275,6 +290,90 @@ export default function HardwareStatusPanel({
 
       {/* Cards Scrollable Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* CARD: Guest Registration */}
+        <Tile tone="paper" className="p-5 shadow-xs">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-surface rounded-full text-ink">
+                <ClipboardList className="h-5 w-5 text-accent" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-display text-lg uppercase tracking-tight text-ink">
+                    Registration
+                  </h3>
+                  {activeEvent ? (
+                    <StatusPill tone="ok" icon={CheckCircle2}>
+                      Open
+                    </StatusPill>
+                  ) : (
+                    <StatusPill tone="warn" icon={AlertTriangle}>
+                      No Active Event
+                    </StatusPill>
+                  )}
+                </div>
+                <p className="text-xs text-muted font-medium mt-0.5">
+                  Shared Google Form link for guest registration and automatic queueing
+                </p>
+              </div>
+            </div>
+
+            {formUrl && (
+              <Pill
+                variant={isCopied ? "primary" : "secondary"}
+                onClick={handleCopyLink}
+                className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+              >
+                {isCopied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-ok" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>Copy Form Link</span>
+                  </>
+                )}
+              </Pill>
+            )}
+          </div>
+
+          <div className="space-y-3 pt-3 border-t border-ink/10 text-xs">
+            {/* Form link input */}
+            <div>
+              <Label className="block mb-1.5">Shared Registration Form URL</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={formUrl || "NEXT_PUBLIC_REGISTRATION_FORM_URL is not configured"}
+                  className="w-full bg-surface text-ink px-3.5 py-2 rounded-xl border border-ink/10 font-mono text-xs select-all focus:outline-none"
+                  aria-label="Shared Google Form link"
+                />
+              </div>
+            </div>
+
+            {/* Dynamic Active Event Note or Warning */}
+            {activeEvent ? (
+              <div className="flex items-center gap-2 p-3 bg-ok/10 text-ok rounded-xl font-medium">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>
+                  Registers guests into the ACTIVE event:{" "}
+                  <strong className="font-bold underline">{activeEvent.name}</strong>
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-3 bg-danger/10 text-danger rounded-xl font-medium">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  Warning: No event is currently active. Guests who submit the registration form will receive an error.
+                </span>
+              </div>
+            )}
+          </div>
+        </Tile>
+
         {/* CARD 1: Camera */}
         <Tile tone="paper" className="p-5 shadow-xs">
           <div className="flex items-start justify-between gap-3 mb-4">

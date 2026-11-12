@@ -47,16 +47,20 @@ async function main() {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const url = `${baseUrl}/api/intake`;
 
-  const eventCode = (process.argv[2] || "SNAP26").trim().toUpperCase();
+  const argEventCode = process.argv[2]?.trim();
+  const eventCode = argEventCode && argEventCode !== "--active" ? argEventCode.toUpperCase() : undefined;
   const fullName = (process.argv[3] || "Alex Morgan").trim();
   const email = (process.argv[4] || `alex_${Date.now()}@example.com`).trim().toLowerCase();
 
-  const payload = {
-    event_code: eventCode,
+  const payload: Record<string, any> = {
     full_name: fullName,
     email: email,
     submitted_at: new Date().toISOString(),
   };
+
+  if (eventCode) {
+    payload.event_code = eventCode;
+  }
 
   const rawBody = JSON.stringify(payload);
   const timestamp = Math.floor(Date.now() / 1000).toString();

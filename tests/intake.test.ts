@@ -78,23 +78,111 @@ test("Intake signature verification rejects tampered body or invalid signature",
   assert.equal(result.reason, "Invalid signature");
 });
 
-test("Intake payload validation requires event_code, 1-100 char full_name, and valid email", () => {
+test("Intake payload validation allows optional event_code, requires 1-100 char full_name and valid email", () => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  const validGuest = {
+  // 1. Valid with event_code
+  const validWithCode = {
     event_code: "SNAP26",
     full_name: "Taylor Swift",
     email: "taylor@example.com",
   };
+  assert.equal(typeof validWithCode.event_code === "string", true);
+  assert.equal(validWithCode.full_name.trim().length >= 1 && validWithCode.full_name.trim().length <= 100, true);
+  assert.equal(emailRegex.test(validWithCode.email), true);
 
-  assert.equal(validGuest.event_code.length > 0, true);
-  assert.equal(validGuest.full_name.trim().length >= 1 && validGuest.full_name.trim().length <= 100, true);
-  assert.equal(emailRegex.test(validGuest.email), true);
+  // 2. Valid without event_code (optional)
+  const validWithoutCode = {
+    full_name: "Taylor Swift",
+    email: "taylor@example.com",
+  };
+  assert.equal((validWithoutCode as any).event_code, undefined);
+  assert.equal(validWithoutCode.full_name.trim().length >= 1 && validWithoutCode.full_name.trim().length <= 100, true);
+  assert.equal(emailRegex.test(validWithoutCode.email), true);
 
+  // 3. Invalid email rejected
   const invalidEmail = "not-an-email";
   assert.equal(emailRegex.test(invalidEmail), false);
 
+  // 4. Empty name rejected
   const emptyName = "   ";
   assert.equal(emptyName.trim().length >= 1, false);
+});
+
+interface MockEvent {
+  id: string;
+  name: string;
+  event_code: string;
+  status: "ACTIVE" | "SCHEDULED" | "CLOSED";
+}
+
+function resolveIntakeTargetEvent(
+  events: MockEvent[],
+  eventCode?: string | null
+): { event: MockEvent | null; status: number; error?: string } {
+  const cleanEventCode = typeof eventCode === "string" ? eventCode.trim().toUpperCase() : "";
+
+  if (cleanEventCode) {
+    const found = events.find((e) => e.event_code.toUpperCase() === cleanEventCode);
+    if (!found) {
+      return { event: null, status: 404, error: "Event not found" };
+    }
+    if (found.status === "CLOSED") {
+      return { event: null, status: 409, error: "Registration closed" };
+    }
+    return { event: found, status: 200 };
+  }
+
+  // No event_code: use the single event with status = 'ACTIVE'
+  const activeEvent = events.find((e) => e.status === "ACTIVE");
+  if (!activeEvent) {
+    return { event: null, status: 409, error: "Registration is not open" };
+  }
+  if (activeEvent.status === "CLOSED") {
+    return { event: null, status: 409, error: "Registration closed" };
+  }
+  return { event: activeEvent, status: 200 };
+}
+
+test("Intake target event resolution: no event_code with an ACTIVE event works", () => {
+  const events: MockEvent[] = [
+    { id: "e1", name: "Grad Gala", event_code: "GRAD26", status: "SCHEDULED" },
+    { id: "e2", name: "Summer Wedding", event_code: "WED26", status: "ACTIVE" },
+  ];
+
+  // Omitted event_code
+  const res1 = resolveIntakeTargetEvent(events, undefined);
+  assert.equal(res1.status, 200);
+  assert.equal(res1.event?.id, "e2");
+  assert.equal(res1.event?.name, "Summer Wedding");
+
+  // Empty string event_code
+  const res2 = resolveIntakeTargetEvent(events, "   ");
+  assert.equal(res2.status, 200);
+  assert.equal(res2.event?.id, "e2");
+});
+
+test("Intake target event resolution: no event_code and no ACTIVE event returns 409 Registration is not open", () => {
+  const events: MockEvent[] = [
+    { id: "e1", name: "Grad Gala", event_code: "GRAD26", status: "SCHEDULED" },
+    { id: "e2", name: "Past Party", event_code: "PARTY25", status: "CLOSED" },
+  ];
+
+  const res = resolveIntakeTargetEvent(events, undefined);
+  assert.equal(res.status, 409);
+  assert.equal(res.error, "Registration is not open");
+  assert.equal(res.event, null);
+});
+
+test("Intake target event resolution: explicit event_code for a non-active (SCHEDULED) event still works", () => {
+  const events: MockEvent[] = [
+    { id: "e1", name: "Future Summit", event_code: "SUMMIT26", status: "SCHEDULED" },
+    { id: "e2", name: "Active Expo", event_code: "EXPO26", status: "ACTIVE" },
+  ];
+
+  const res = resolveIntakeTargetEvent(events, "SUMMIT26");
+  assert.equal(res.status, 200);
+  assert.equal(res.event?.id, "e1");
+  assert.equal(res.event?.status, "SCHEDULED");
 });
 
