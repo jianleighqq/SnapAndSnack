@@ -17,6 +17,7 @@ import {
   Info,
   ClipboardList,
   Copy,
+  Mail,
 } from "lucide-react";
 import type { Event } from "@/lib/types";
 import {
@@ -64,6 +65,55 @@ export default function HardwareStatusPanel({
     navigator.clipboard.writeText(formUrl);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  // Test Email state
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [testEmailFeedback, setTestEmailFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress.trim()) return;
+    setIsSendingTestEmail(true);
+    setTestEmailFeedback(null);
+
+    try {
+      const res = await fetch("/api/admin/test-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: testEmailAddress.trim(),
+          eventName: activeEvent?.name || selectedEvent?.name || "Snap & Snack Event",
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setTestEmailFeedback({
+          type: "success",
+          message:
+            data.provider === "skipped"
+              ? "Email skipped (neither SMTP nor Resend configured in .env.local)"
+              : `Test email sent via ${String(data.provider).toUpperCase()}! Please check inbox and spam.`,
+        });
+      } else {
+        setTestEmailFeedback({
+          type: "error",
+          message: data.error || "Failed to send test email.",
+        });
+      }
+    } catch (err: any) {
+      setTestEmailFeedback({
+        type: "error",
+        message: err?.message || "Failed to send test email.",
+      });
+    } finally {
+      setIsSendingTestEmail(false);
+    }
   };
 
   // Loading states
@@ -371,6 +421,48 @@ export default function HardwareStatusPanel({
                 </span>
               </div>
             )}
+
+            {/* Test Email Section */}
+            <div className="pt-3 border-t border-ink/10">
+              <Label className="block mb-1.5">Test Confirmation Email Delivery</Label>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="email"
+                  placeholder="Enter email to test (e.g. your-email@gmail.com)"
+                  value={testEmailAddress}
+                  onChange={(e) => setTestEmailAddress(e.target.value)}
+                  className="flex-1 bg-surface text-ink px-3.5 py-2 rounded-xl border border-ink/10 text-xs focus:outline-none"
+                  aria-label="Test recipient email"
+                />
+                <Pill
+                  variant="secondary"
+                  disabled={isSendingTestEmail || !testEmailAddress.trim()}
+                  onClick={handleSendTestEmail}
+                  className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>{isSendingTestEmail ? "Sending..." : "Send test email"}</span>
+                </Pill>
+              </div>
+
+              {testEmailFeedback && (
+                <div
+                  className={cn(
+                    "mt-2 p-2.5 rounded-xl text-xs flex items-center gap-2",
+                    testEmailFeedback.type === "success"
+                      ? "bg-ok/10 text-ok"
+                      : "bg-danger/10 text-danger"
+                  )}
+                >
+                  {testEmailFeedback.type === "success" ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                  )}
+                  <span>{testEmailFeedback.message}</span>
+                </div>
+              )}
+            </div>
           </div>
         </Tile>
 

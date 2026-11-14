@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseServer } from "@/lib/supabase-server";
 import { refreshStatuses } from "@/lib/queue";
+import { sendRegistrationEmail } from "@/lib/email";
+import { extractFirstName } from "@/lib/booth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -254,57 +256,19 @@ export async function POST(request: Request) {
       console.warn("refreshStatuses error during intake:", refreshErr);
     }
 
-    // 6. Send notification email via Resend if configured
-    const resendApiKey = process.env.RESEND_API_KEY;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const guestLink = `${appUrl}/guest?token=${newGuest.guest_token}`;
-
-    if (resendApiKey) {
-      try {
-        const emailFrom = process.env.EMAIL_FROM || "Snap & Snack <onboarding@resend.dev>";
-        const emailRes = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${resendApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: emailFrom,
-            to: normalizedEmail,
-            subject: `You're in line for ${event.name}! (#${createdEntry.queue_number})`,
-            html: `
-              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #161513; background-color: #f6f4f1;">
-                <h1 style="text-transform: uppercase; font-size: 22px; letter-spacing: 2px; margin-bottom: 8px;">Snap &amp; Snack</h1>
-                <p style="font-size: 14px; color: #73706b; margin-top: 0;">You have joined the photo booth queue for <strong>${event.name}</strong>.</p>
-                <div style="background: #ffffff; border-radius: 16px; padding: 24px; text-align: center; margin: 24px 0; border: 1px solid rgba(22,21,19,0.1);">
-                  <span style="font-size: 11px; text-transform: uppercase; color: #73706b; font-weight: 700; letter-spacing: 1.5px;">Queue Spot</span>
-                  <div style="font-size: 54px; font-weight: 900; color: #161513; margin: 8px 0; font-family: monospace;">#${String(createdEntry.queue_number).padStart(2, "0")}</div>
-                  <p style="font-size: 13px; color: #73706b; margin: 0;">Status: <strong>WAITING</strong></p>
-                </div>
-                <p style="font-size: 14px; margin-bottom: 24px; line-height: 1.5;">Track your spot in line and view your photo session status using your personal link:</p>
-                <a href="${guestLink}" style="display: block; background: #161513; color: #f6f4f1; text-align: center; padding: 14px 24px; border-radius: 9999px; text-decoration: none; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;">
-                  View Live Status
-                </a>
-                <p style="font-size: 11px; color: #73706b; margin-top: 28px; word-break: break-all;">
-                  Personal link: <a href="${guestLink}" style="color: #e8541e;">${guestLink}</a>
-                </p>
-              </div>
-            `,
-          }),
-        });
-
-        if (!emailRes.ok) {
-          const errText = await emailRes.text();
-          console.error("Resend delivery failed with status:", emailRes.status, errText);
-        } else {
-          console.log(`Confirmation email sent via Resend to ${normalizedEmail}`);
-        }
-      } catch (emailErr) {
-        // Email failing must NOT fail the registration: return 200 anyway
-        console.error("Resend email dispatch error:", emailErr);
-      }
-    } else {
-      console.log("email skipped (no RESEND_API_KEY)");
+    // 6. Send notification email via Gmail SMTP (or Resend fallback)
+    try {
+      const firstName = extractFirstName(newGuest.full_name);
+      await sendRegistrationEmail({
+        to: normalizedEmail,
+        firstName,
+        queueNumber: createdEntry.queue_number,
+        eventName: event.name,
+        guestToken: newGuest.guest_token,
+      });
+    } catch (emailErr) {
+      // Email failing must never fail registration: still return 200
+      console.error("Intake email dispatch error:", emailErr);
     }
 
     // 7. Response

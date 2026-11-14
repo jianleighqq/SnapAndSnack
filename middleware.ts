@@ -35,6 +35,7 @@ export async function middleware(request: NextRequest) {
   const isProtectedPage = pathname.startsWith("/admin");
 
   const isProtectedApi =
+    pathname.startsWith("/api/admin") ||
     pathname.startsWith("/api/events") ||
     pathname.startsWith("/api/queue") ||
     pathname.startsWith("/api/session") ||
