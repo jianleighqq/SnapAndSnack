@@ -69,6 +69,7 @@ export interface IDataStore {
     queueEntry: QueueEntryWithGuest | null;
     positionInLine: number | null;
   } | null>;
+  getGuestTokenByQueueId(queueId: string): Promise<string | null>;
 
   // Shoot session operations
   getOrCreateShootSession(
@@ -860,6 +861,37 @@ class SupabaseDataStore implements IDataStore {
       };
     } catch (err) {
       console.error("Supabase getGuestByToken error:", err);
+      return null;
+    }
+  }
+
+  async getGuestTokenByQueueId(queueId: string): Promise<string | null> {
+    try {
+      const { data, error } = await supabaseServer
+        .from("queue_entries")
+        .select("id, guest_id, guests(guest_token)")
+        .eq("id", queueId)
+        .maybeSingle();
+
+      if (error || !data) return null;
+      const guestData: any = data.guests;
+      if (guestData && typeof guestData.guest_token === "string" && guestData.guest_token) {
+        return guestData.guest_token;
+      }
+      if (Array.isArray(guestData) && guestData[0]?.guest_token) {
+        return guestData[0].guest_token;
+      }
+      if (data.guest_id) {
+        const { data: gData } = await supabaseServer
+          .from("guests")
+          .select("guest_token")
+          .eq("id", data.guest_id)
+          .maybeSingle();
+        return gData?.guest_token || null;
+      }
+      return null;
+    } catch (err) {
+      console.error("Supabase getGuestTokenByQueueId error:", err);
       return null;
     }
   }

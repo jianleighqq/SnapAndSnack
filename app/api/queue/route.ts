@@ -7,8 +7,17 @@ export const revalidate = 0;
 export async function GET() {
   try {
     const { event, queue } = await db.getActiveEventWithQueue();
+    // Security: Never expose guest tokens in the general queue list response
+    const sanitizedQueue = (queue || []).map((entry) => ({
+      ...entry,
+      guest: {
+        ...entry.guest,
+        guest_token: "",
+      },
+    }));
+
     return NextResponse.json(
-      { event, queue },
+      { event, queue: sanitizedQueue },
       {
         headers: {
           "Cache-Control": "no-store, no-cache, must-revalidate",
