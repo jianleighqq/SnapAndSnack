@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { getCurrentBoothGuest } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
   if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
@@ -108,6 +110,12 @@ export async function POST(request: Request) {
       targetSessionId = sRows?.[0]?.id || null;
     }
 
+    if (!targetSessionId) {
+      // Ensure an active shoot session exists for this guest
+      const session = await db.getOrCreateShootSession(context.queueEntry.id, "Photo");
+      targetSessionId = session?.id || null;
+    }
+
     // Determine extension
     let extension = "jpg";
     if (mimeType.includes("png")) extension = "png";
@@ -129,7 +137,7 @@ export async function POST(request: Request) {
       });
 
     if (uploadError) {
-      console.error("[Booth Upload] Supabase storage upload error:", uploadError);
+      console.error("[Booth Upload] Supabase storage upload error:", uploadError.message || uploadError);
       return NextResponse.json(
         { error: "Failed to upload image to storage" },
         { status: 500, headers: { "Cache-Control": "no-store" } }
@@ -142,32 +150,130 @@ export async function POST(request: Request) {
       .getPublicUrl(storagePath);
     const publicUrl = urlData?.publicUrl || storagePath;
 
-    // Record in media_assets table strictly scoped to current guest
-    const { data: assetData, error: dbError } = await supabaseServer
-      .from("media_assets")
-      .insert({
-        event_id: context.event.id,
-        guest_id: context.guest.id,
-        session_id: targetSessionId || null,
-        storage_path: storagePath,
-        public_url: publicUrl,
-        media_type: mediaType,
-        shot_number: mediaType === "PHOTO" ? shotNumber || 1 : null,
-        retake_count: retakeCount ?? 0,
-        pose_id: poseId || null,
-        in_gallery: false,
-      })
-      .select("id")
-      .single();
+    // Sanitize poseId (UUID foreign key in Postgres; store null if not a valid UUID)
+    const sanitizedPoseId = poseId && UUID_REGEX.test(poseId) ? poseId : null;
 
-    if (dbError) {
-      console.error("[Booth Upload] Failed to record media asset:", dbError);
+    // Record in media_assets table strictly adhering to schema:
+    // (id, session_id, pose_id, media_type, shot_number, retake_count, storage_path, in_gallery, created_at)
+    // Note: media_assets does NOT have event_id, guest_id, or public_url.
+    let assetId: string | null = null;
+
+    if (mediaType === "PHOTO") {
+      // Check existing row for idempotency on Retry Save
+      const { data: existing, error: selectErr } = await supabaseServer
+        .from("media_assets")
+        .select("id")
+        .eq("session_id", targetSessionId)
+        .eq("media_type", "PHOTO")
+        .eq("shot_number", shotNumber || 1)
+        .limit(1);
+
+      if (selectErr) {
+        console.error("[Booth Upload] Error checking existing photo asset:", selectErr.message || selectErr);
+      }
+
+      if (existing && existing.length > 0) {
+        const { data: updated, error: updateErr } = await supabaseServer
+          .from("media_assets")
+          .update({
+            storage_path: storagePath,
+            retake_count: retakeCount ?? 0,
+            pose_id: sanitizedPoseId,
+          })
+          .eq("id", existing[0].id)
+          .select("id")
+          .single();
+
+        if (updateErr) {
+          console.error("[Booth Upload] Failed to update media asset:", updateErr.message, updateErr.details, updateErr.hint);
+          return NextResponse.json(
+            { error: "Could not save photo record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = updated?.id || existing[0].id;
+      } else {
+        const { data: inserted, error: insertErr } = await supabaseServer
+          .from("media_assets")
+          .insert({
+            session_id: targetSessionId,
+            media_type: "PHOTO",
+            shot_number: shotNumber || 1,
+            retake_count: retakeCount ?? 0,
+            pose_id: sanitizedPoseId,
+            storage_path: storagePath,
+            in_gallery: false,
+          })
+          .select("id")
+          .single();
+
+        if (insertErr) {
+          console.error("[Booth Upload] Failed to insert media asset:", insertErr.message, insertErr.details, insertErr.hint);
+          return NextResponse.json(
+            { error: "Could not save photo record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = inserted?.id || null;
+      }
+    } else {
+      // STRIP: Check existing row for idempotency on Retry Save
+      const { data: existing, error: selectErr } = await supabaseServer
+        .from("media_assets")
+        .select("id")
+        .eq("session_id", targetSessionId)
+        .eq("media_type", "STRIP")
+        .limit(1);
+
+      if (selectErr) {
+        console.error("[Booth Upload] Error checking existing strip asset:", selectErr.message || selectErr);
+      }
+
+      if (existing && existing.length > 0) {
+        const { data: updated, error: updateErr } = await supabaseServer
+          .from("media_assets")
+          .update({
+            storage_path: storagePath,
+          })
+          .eq("id", existing[0].id)
+          .select("id")
+          .single();
+
+        if (updateErr) {
+          console.error("[Booth Upload] Failed to update strip media asset:", updateErr.message, updateErr.details, updateErr.hint);
+          return NextResponse.json(
+            { error: "Could not save strip record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = updated?.id || existing[0].id;
+      } else {
+        const { data: inserted, error: insertErr } = await supabaseServer
+          .from("media_assets")
+          .insert({
+            session_id: targetSessionId,
+            media_type: "STRIP",
+            storage_path: storagePath,
+            in_gallery: false,
+          })
+          .select("id")
+          .single();
+
+        if (insertErr) {
+          console.error("[Booth Upload] Failed to insert strip media asset:", insertErr.message, insertErr.details, insertErr.hint);
+          return NextResponse.json(
+            { error: "Could not save strip record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = inserted?.id || null;
+      }
     }
 
     return NextResponse.json(
       {
         success: true,
-        mediaAssetId: assetData?.id || null,
+        mediaAssetId: assetId,
         url: publicUrl,
       },
       {
