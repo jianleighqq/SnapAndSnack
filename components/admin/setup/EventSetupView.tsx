@@ -227,10 +227,10 @@ export default function EventSetupView({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-10rem)] min-h-[580px]">
+    <div className="flex flex-col min-h-[580px] lg:h-[calc(100vh-10rem)]">
       {/* TABS ROW */}
-      <div className="flex items-center justify-between pb-4">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Setup & Diagnostics Tab */}
           <Pill
             variant={currentTab === "setup" ? "primary" : "secondary"}
@@ -269,9 +269,9 @@ export default function EventSetupView({
       </div>
 
       {/* TWO COLUMN WORKSPACE */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0 overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0 overflow-visible lg:overflow-hidden pb-8 lg:pb-0">
         {/* LEFT COLUMN: Events (4 columns) */}
-        <div className="lg:col-span-4 h-full min-h-0 flex flex-col">
+        <div className="lg:col-span-4 h-auto lg:h-full min-h-0 flex flex-col">
           <EventsList
             events={events}
             selectedEventId={selectedEventId}
@@ -281,7 +281,7 @@ export default function EventSetupView({
         </div>
 
         {/* RIGHT COLUMN: Tab Panel (8 columns) */}
-        <div className="lg:col-span-8 h-full min-h-0 flex flex-col">
+        <div className="lg:col-span-8 h-auto lg:h-full min-h-0 flex flex-col">
           {currentTab === "setup" ? (
             <HardwareStatusPanel
               selectedEvent={selectedEvent}

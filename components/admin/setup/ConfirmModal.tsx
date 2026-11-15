@@ -50,13 +50,13 @@ export default function ConfirmModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/30 backdrop-blur-sm overflow-y-auto"
       onClick={() => {
         if (!isLoading) onClose();
       }}
     >
       <div
-        className="w-full max-w-md rounded-tile bg-paper p-6 text-ink relative shadow-xl"
+        className="w-full max-w-md rounded-tile bg-paper p-4 sm:p-6 text-ink relative shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between pb-3">

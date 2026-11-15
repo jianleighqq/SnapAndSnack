@@ -923,11 +923,11 @@ export default function ShootConsole() {
         <Hairline />
       </header>
 
-      {/* MAIN STEP CONTENT - Viewport constrained with zero scroll on 1920x1080 and 1470x956 */}
-      <main className="relative z-10 flex flex-1 flex-col justify-center overflow-hidden py-2 sm:py-3">
+      {/* MAIN STEP CONTENT - Fluid responsive layout across tablets, laptops and desktops */}
+      <main className="relative z-10 flex flex-1 flex-col justify-center overflow-y-auto no-scrollbar py-2 sm:py-3">
         {/* STEP 1: CHOOSE PER-SHOT POSES */}
         {step === "choose" && (
-          <div className="mx-auto flex h-full max-h-[calc(100vh-140px)] w-full max-w-5xl flex-col justify-between animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col justify-between space-y-3 animate-fadeIn">
             {/* Header / Subtitle */}
             <div className="text-center space-y-1">
               <Label tone="accent">Step 01 · Plan Your Sequence</Label>
@@ -985,7 +985,7 @@ export default function ShootConsole() {
                     ? "grid-cols-2"
                     : totalShots === 3
                     ? "grid-cols-3"
-                    : "grid-cols-4"
+                    : "grid-cols-2 sm:grid-cols-4"
                 }`}
               >
                 {Array.from({ length: totalShots }).map((_, slotIdx) => {
@@ -1049,7 +1049,7 @@ export default function ShootConsole() {
               <Label className="text-muted text-[10px]">
                 Available Poses · Tap to fill Shot {activeSlotIndex + 1}
               </Label>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 max-h-[22vh]">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 max-h-[26vh] sm:max-h-[22vh] overflow-y-auto sm:overflow-visible">
                 {POSES.map((pose) => {
                   const IconComponent = pose.icon;
                   const isCurrentSlotPose = selectedPoses[activeSlotIndex] === pose.id;
@@ -1140,9 +1140,9 @@ export default function ShootConsole() {
 
         {/* STEP 2: COUNTDOWN & INTRO POSE PREVIEW */}
         {step === "countdown" && (
-          <div className="mx-auto flex h-full max-h-[calc(100vh-140px)] w-full max-w-4xl flex-col items-center justify-between animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-4xl flex-col items-center justify-between space-y-3 animate-fadeIn">
             {/* Viewfinder Tile */}
-            <div className="relative flex aspect-[4/3] w-full max-h-[54vh] flex-col items-center justify-center overflow-hidden rounded-tile bg-[#181614] text-paper shadow-2xl border border-ink/10">
+            <div className="relative flex aspect-[4/3] w-full max-h-[46vh] sm:max-h-[54vh] flex-col items-center justify-center overflow-hidden rounded-tile bg-[#181614] text-paper shadow-2xl border border-ink/10">
               {/* LIVE CAMERA VIDEO (Mirrored preview only for natural mirror reflection) */}
               <video
                 ref={videoRef}
@@ -1421,10 +1421,10 @@ export default function ShootConsole() {
 
         {/* STEP 3: PREVIEW - SUB-FLOW: ALL SHOTS SUMMARY SCREEN */}
         {step === "preview" && previewMode === "summary" && (
-          <div className="mx-auto flex h-full max-h-[calc(100vh-140px)] w-full max-w-5xl flex-col items-center justify-between animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col items-center justify-between space-y-3 animate-fadeIn">
             <div className="text-center space-y-1">
               <Label tone="accent">Step 03 · Review Summary</Label>
-              <h2 className="font-display text-[clamp(26px,4vh,44px)] uppercase tracking-tight leading-tight">
+              <h2 className="font-display text-[clamp(24px,4vh,44px)] uppercase tracking-tight leading-tight">
                 All Shots <span className="text-accent">Reviewed</span>
               </h2>
               <p className="font-sans text-xs text-muted">
@@ -1433,10 +1433,10 @@ export default function ShootConsole() {
             </div>
 
             {/* Center Area: Composed Strip Preview on Left, Tappable Thumbnails on Right */}
-            <div className="grid w-full flex-1 grid-cols-1 md:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center justify-center max-h-[50vh] overflow-hidden py-1">
+            <div className="grid w-full flex-1 grid-cols-1 md:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center justify-center max-h-none md:max-h-[50vh] overflow-visible md:overflow-hidden py-1">
               {/* Composed Strip Preview */}
-              <div className="flex justify-center h-full max-h-[48vh]">
-                <div className="relative aspect-[2/3] h-full max-h-[48vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1">
+              <div className="flex justify-center h-full max-h-[40vh] sm:max-h-[48vh]">
+                <div className="relative aspect-[2/3] h-full max-h-[40vh] sm:max-h-[48vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1">
                   {composedImageUrl && (
                     <img
                       src={composedImageUrl}
@@ -1448,7 +1448,7 @@ export default function ShootConsole() {
               </div>
 
               {/* Tappable Thumbnails Grid */}
-              <div className="flex flex-col justify-between h-full max-h-[48vh] space-y-3">
+              <div className="flex flex-col justify-between h-full max-h-none md:max-h-[48vh] space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 flex-1 overflow-hidden">
                   {Array.from({ length: totalShots }).map((_, idx) => {
                     const shot = capturedShots[idx];
@@ -1532,10 +1532,10 @@ export default function ShootConsole() {
 
         {/* STEP 4: OUTPUT */}
         {step === "output" && (
-          <div className="mx-auto flex h-full max-h-[calc(100vh-140px)] w-full max-w-5xl flex-col items-center justify-between animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col items-center justify-between space-y-3 animate-fadeIn">
             <div className="text-center space-y-1">
               <Label tone="accent">Step 04 · Collect</Label>
-              <h2 className="font-display text-[clamp(28px,4.5vh,48px)] uppercase tracking-tight leading-tight">
+              <h2 className="font-display text-[clamp(26px,4.5vh,48px)] uppercase tracking-tight leading-tight">
                 Your Print Is <span className="text-accent">Ready</span>
               </h2>
               <p className="font-sans text-xs text-muted">
@@ -1544,10 +1544,10 @@ export default function ShootConsole() {
             </div>
 
             {/* Center Content: Composed 4x6 Canvas + Action Tiles */}
-            <div className="grid w-full flex-1 grid-cols-1 md:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center justify-center max-h-[50vh] overflow-hidden py-1">
+            <div className="grid w-full flex-1 grid-cols-1 md:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center justify-center max-h-none md:max-h-[50vh] overflow-visible md:overflow-hidden py-1">
               {/* Composed 4x6 Layout Preview */}
-              <div className="flex justify-center h-full max-h-[46vh]">
-                <div className="relative aspect-[2/3] h-full max-h-[46vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1">
+              <div className="flex justify-center h-full max-h-[38vh] sm:max-h-[46vh]">
+                <div className="relative aspect-[2/3] h-full max-h-[38vh] sm:max-h-[46vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1">
                   {composedImageUrl && (
                     <img
                       src={composedImageUrl}
@@ -1559,7 +1559,7 @@ export default function ShootConsole() {
               </div>
 
               {/* Three Output Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 h-full max-h-[46vh] items-stretch">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 h-full max-h-none md:max-h-[46vh] items-stretch">
                 {/* PRINT ACTION */}
                 <Tile
                   tone="surface"

@@ -15,8 +15,8 @@ interface BoothAttractScreenProps {
   activeGuest?: QueueEntryWithGuest | null;
 }
 
-// Headline size scales with the screen so the layout never scrolls (laptop to 1080p booth).
-const headlineSize = { "--hl": "min(18vh, 13vw)" } as React.CSSProperties;
+// Headline size scales with the screen so the layout never scrolls on landscape booth displays
+const headlineSize = { "--hl": "min(16vh, 12vw)" } as React.CSSProperties;
 
 export default function BoothAttractScreen({
   event,
@@ -46,22 +46,26 @@ export default function BoothAttractScreen({
   return (
     <div
       onClick={handleStartShooting}
-      className="relative flex h-screen w-screen cursor-pointer select-none flex-col overflow-hidden bg-paper text-ink"
+      className="relative flex min-h-screen w-full max-w-full cursor-pointer select-none flex-col justify-between overflow-x-hidden bg-paper text-ink"
     >
       {/* TOP BAR: brand mark + quiet Config Settings pill */}
-      <header className="flex items-center justify-between gap-6 px-8 pt-6 lg:px-12 lg:pt-8">
-        <div className="flex items-center gap-3.5">
+      <header className="flex w-full max-w-full items-center justify-between gap-3 px-4 pt-4 sm:px-8 sm:pt-6 lg:px-12 lg:pt-8 shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
           <img
             src="/logo.png"
             alt="Snap & Snack logo"
-            className="h-10 w-auto object-contain"
+            className="h-8 sm:h-10 w-auto object-contain shrink-0"
           />
-          <span className="font-display text-2xl uppercase tracking-wide">Snap &amp; Snack</span>
+          <span className="font-display text-xl sm:text-2xl uppercase tracking-wide whitespace-nowrap">
+            Snap &amp; Snack
+          </span>
         </div>
 
-        <div className="flex items-center gap-4">
-          <Label>Config</Label>
-          <Hairline strong className="w-10 lg:w-16" />
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          <div className="hidden sm:flex items-center gap-2 lg:gap-4">
+            <Label>Config</Label>
+            <Hairline strong className="w-8 sm:w-10 lg:w-16" />
+          </div>
           <Pill
             variant="secondary"
             size="lg"
@@ -69,18 +73,59 @@ export default function BoothAttractScreen({
               e.stopPropagation();
               router.push("/login?from=/admin/queue");
             }}
-            className="px-6 text-sm"
+            className="min-h-[44px] px-3 sm:px-6 text-xs sm:text-sm shrink-0"
             aria-label="Open Operator Config Settings"
           >
-            <Lock className="h-4 w-4" />
-            <span>Config Settings</span>
+            <Lock className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Config Settings</span>
           </Pill>
         </div>
       </header>
 
-      {/* CENTER: rails + stacked headline. Rail rows match the headline line height. */}
-      <main className="flex flex-1 items-center px-8 lg:px-12" style={headlineSize}>
-        <div className="grid w-full grid-cols-[1fr_auto_1fr] items-start gap-x-6 lg:gap-x-8">
+      {/* CENTER: Responsive presentation */}
+      <main className="flex flex-1 items-center justify-center px-4 sm:px-8 lg:px-12 py-4">
+        {/* Mobile & Small Screen Vertical Stack (< md) */}
+        <div className="flex md:hidden flex-col items-center justify-center text-center w-full max-w-sm mx-auto space-y-6 animate-fadeIn">
+          {/* Headline */}
+          <h1 className="font-display text-[clamp(3.25rem,14vw,5rem)] uppercase leading-[0.88] tracking-tight text-center">
+            <span className="block">Smile</span>
+            <span className="block text-accent">&amp; Pose</span>
+          </h1>
+
+          {/* Event tile */}
+          <Tile tone="sun" className="w-full px-5 py-4 sm:px-6 sm:py-5 text-center shadow-xs rounded-tile">
+            <Label tone="inherit" className="opacity-70">
+              Now hosting
+            </Label>
+            <p className="mt-1.5 line-clamp-2 font-display text-2xl uppercase leading-none">
+              {eventTitle}
+            </p>
+          </Tile>
+
+          {/* Start Shooting Button */}
+          <div className="w-full pt-1 flex flex-col items-center space-y-3">
+            <Pill
+              variant="primary"
+              size="lg"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStartShooting();
+              }}
+              className="animate-soft-pulse w-full min-h-[60px] justify-center text-lg uppercase tracking-wide gap-2.5 shadow-md"
+              aria-label="Start Shooting Photo Booth"
+            >
+              <Camera className="h-6 w-6 shrink-0" />
+              <span>Start Shooting</span>
+            </Pill>
+            <Label className="text-muted text-[11px]">Tap anywhere to begin</Label>
+          </div>
+        </div>
+
+        {/* Tablet Landscape & Desktop 3-Column Rail Grid (md:) */}
+        <div
+          className="hidden md:grid w-full grid-cols-[1fr_auto_1fr] items-start gap-x-6 lg:gap-x-8"
+          style={headlineSize}
+        >
           {/* Left rail */}
           <div className="flex min-w-0 flex-col">
             <div className="flex h-[calc(var(--hl)*0.9)] items-center justify-end gap-4">
@@ -140,9 +185,11 @@ export default function BoothAttractScreen({
       </main>
 
       {/* BOTTOM: static mono ticker */}
-      <footer className="pb-5">
+      <footer className="w-full max-w-full pb-4 sm:pb-5 overflow-hidden shrink-0">
         <Hairline />
-        <Ticker className="pt-4" items={["Snap", "Smile", "Snack", "Repeat"]} />
+        <div className="w-full max-w-full overflow-hidden">
+          <Ticker className="pt-3 sm:pt-4" items={["Snap", "Smile", "Snack", "Repeat"]} />
+        </div>
       </footer>
     </div>
   );

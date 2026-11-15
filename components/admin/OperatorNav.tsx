@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, Settings, Camera, QrCode, Image as ImageIcon, MonitorPlay, LogOut } from "lucide-react";
+import { Users, Settings, Camera, Image as ImageIcon, MonitorPlay, LogOut } from "lucide-react";
 import { Pill, PillLink } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { cn } from "@/components/ui/cn";
@@ -53,38 +53,43 @@ export default function OperatorNav() {
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-ink/15 bg-paper/90 text-ink backdrop-blur">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between gap-4">
+    <header className="sticky top-0 z-40 w-full max-w-full border-b border-ink/15 bg-paper/95 text-ink backdrop-blur">
+      <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
+        <div className="flex h-16 items-center justify-between gap-2 sm:gap-4 overflow-x-auto no-scrollbar">
           {/* Brand identifier */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <Link
               href="/admin/queue"
-              className="flex items-center gap-2.5 font-display text-xl uppercase tracking-wide transition-colors hover:text-accent"
+              className="flex items-center gap-2 font-display text-lg sm:text-xl uppercase tracking-wide transition-colors hover:text-accent whitespace-nowrap"
             >
               <img
                 src="/logo.png"
                 alt="Snap & Snack logo"
-                className="h-7 w-auto object-contain"
+                className="h-6 sm:h-7 w-auto object-contain shrink-0"
               />
-              <span>Snap &amp; Snack</span>
+              <span className="whitespace-nowrap">Snap &amp; Snack</span>
             </Link>
-            <Label className="hidden border-l border-ink/15 pl-3 sm:inline-block">Operator</Label>
+            <Label className="hidden border-l border-ink/15 pl-3 sm:inline-block shrink-0">
+              Operator
+            </Label>
           </div>
 
           {/* Navigation links */}
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-1 shrink-0">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href || (item.href !== "/admin/queue" && pathname.startsWith(item.href));
+              const isActive =
+                pathname === item.href ||
+                (item.href !== "/admin/queue" && pathname.startsWith(item.href));
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  title={item.name}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "interactive-nav-item flex min-h-[44px] items-center gap-1.5 rounded-full px-3 text-sm font-medium lg:px-4",
-                    isActive ? "bg-ink text-paper" : "text-ink/70"
+                    "interactive-nav-item flex min-h-[44px] min-w-[40px] sm:min-w-[44px] items-center justify-center gap-1.5 rounded-full px-2.5 text-sm font-medium transition-colors sm:px-3 lg:px-4",
+                    isActive ? "bg-ink text-paper" : "text-ink/70 hover:text-ink"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
@@ -94,14 +99,14 @@ export default function OperatorNav() {
             })}
 
             {/* Back to Booth screen & Logout */}
-            <div className="ml-2 flex items-center gap-2 border-l border-ink/15 pl-3">
+            <div className="ml-1 sm:ml-2 flex items-center gap-1 sm:gap-2 border-l border-ink/15 pl-1.5 sm:pl-3 shrink-0">
               <PillLink
                 href="/"
                 variant="secondary"
-                className="px-4"
+                className="min-h-[44px] px-2.5 sm:px-4 justify-center"
                 title="Return to guest-facing booth screen"
               >
-                <MonitorPlay className="h-4 w-4 text-accent" />
+                <MonitorPlay className="h-4 w-4 text-accent shrink-0" />
                 <span className="hidden lg:inline">Booth Screen</span>
               </PillLink>
 
@@ -109,10 +114,10 @@ export default function OperatorNav() {
                 variant="secondary"
                 onClick={handleLogout}
                 disabled={isLoggingOut}
-                className="px-3 text-xs font-mono uppercase tracking-wider text-muted hover:text-danger hover:border-danger/40"
+                className="min-h-[44px] px-2.5 sm:px-3 text-xs font-mono uppercase tracking-wider text-muted hover:text-danger hover:border-danger/40 justify-center"
                 title="Log out of operator console"
               >
-                <LogOut className="h-3.5 w-3.5" />
+                <LogOut className="h-3.5 w-3.5 shrink-0" />
                 <span className="hidden lg:inline">Log out</span>
               </Pill>
             </div>

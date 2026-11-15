@@ -222,7 +222,7 @@ export default function OperatorGalleryPage() {
                       href={`/gallery?token=${encodeURIComponent(g.guest_token)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="interactive-secondary w-full inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-full border border-ink/20 px-4 text-xs font-mono uppercase tracking-wider text-ink hover:bg-ink/5 transition-colors"
+                      className="interactive-secondary w-full inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-full border border-ink/20 px-4 text-xs font-mono uppercase tracking-wider text-ink hover:bg-ink/5 transition-colors"
                     >
                       <span>Open Guest View</span>
                       <ExternalLink className="h-3.5 w-3.5 text-accent" />

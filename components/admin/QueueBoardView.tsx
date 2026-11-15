@@ -375,13 +375,13 @@ export default function QueueBoardView({
             </p>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {filterTabs.map((tab) => (
               <Pill
                 key={tab.key}
                 variant={filterTab === tab.key ? "primary" : "ghost"}
                 onClick={() => setFilterTab(tab.key)}
-                className="px-4"
+                className="px-3.5 sm:px-4 text-xs font-mono"
               >
                 {tab.label}
               </Pill>
@@ -389,7 +389,7 @@ export default function QueueBoardView({
           </div>
         </div>
 
-        <div className="divide-y divide-ink/10 border-y border-ink/15">
+        <div className="space-y-3 sm:space-y-0 sm:divide-y sm:divide-ink/10 sm:border-y sm:border-ink/15">
           {displayedQueue.length === 0 ? (
             <div className="py-12 text-center">
               <Label>
@@ -410,8 +410,10 @@ export default function QueueBoardView({
                   key={entry.id}
                   onClick={() => setSelectedEntry(entry)}
                   className={cn(
-                    "group flex cursor-pointer flex-col items-start justify-between gap-3 px-2 py-4 transition-colors hover:bg-surface/70 focus:outline-none focus-visible:bg-surface sm:flex-row sm:items-center",
-                    isInProgress && "bg-accent/[0.06]",
+                    "group flex cursor-pointer flex-col items-start justify-between gap-3 transition-colors hover:bg-surface/70 focus:outline-none focus-visible:bg-surface",
+                    // Phone: flat surface card with rounded borders
+                    "rounded-tile bg-surface/60 border border-ink/10 p-4 sm:mb-0 sm:rounded-none sm:bg-transparent sm:border-0 sm:px-2 sm:py-3.5 sm:flex-row sm:items-center",
+                    isInProgress && "bg-accent/[0.08] border-accent/30 sm:bg-accent/[0.06]",
                     isCancelled && "opacity-60"
                   )}
                   role="button"
@@ -423,35 +425,35 @@ export default function QueueBoardView({
                   }}
                 >
                   {/* Left: Queue # + Guest details */}
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 sm:gap-4 min-w-0">
                     <div
                       className={cn(
-                        "flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-display text-xl",
-                        entry.status === "WAITING" ? "bg-surface text-ink" : queueNumberClasses(entry.status)
+                        "flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center rounded-full font-display text-lg sm:text-xl",
+                        entry.status === "WAITING" ? "bg-surface text-ink border border-ink/10 sm:border-0" : queueNumberClasses(entry.status)
                       )}
                     >
                       #{entry.queue_number}
                     </div>
 
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-base font-semibold text-ink transition-colors group-hover:text-accent">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-semibold text-ink transition-colors group-hover:text-accent truncate">
                           {entry.guest.full_name}
                         </h3>
                         {isInProgress && <Label tone="accent">Now shooting</Label>}
                       </div>
-                      <p className="font-mono text-xs text-muted">
+                      <p className="font-mono text-xs text-muted truncate">
                         {entry.guest.email}
                       </p>
                     </div>
                   </div>
 
                   {/* Right: Status badge & Action Hint */}
-                  <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
+                  <div className="flex w-full items-center justify-between gap-3 pt-2 sm:pt-0 border-t border-ink/5 sm:border-t-0 sm:w-auto sm:justify-end">
                     <QueueStatusPill status={entry.status} />
 
-                    {/* Manage hint (the whole row is the button) */}
-                    <span className="flex items-center gap-1 rounded-full border border-ink/15 px-3 py-1.5 text-xs font-medium text-muted transition-colors group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
+                    {/* Manage hint with 44px tap target on mobile */}
+                    <span className="flex min-h-[44px] sm:min-h-[32px] items-center gap-1 rounded-full border border-ink/15 px-3.5 py-1.5 text-xs font-medium text-muted transition-colors group-hover:border-ink group-hover:bg-ink group-hover:text-paper">
                       <span>Manage</span>
                       <ChevronRight className="h-3.5 w-3.5" />
                     </span>

@@ -168,11 +168,11 @@ export default function EventModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="event-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/30 backdrop-blur-sm overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-tile bg-paper p-6 text-ink relative max-h-[90vh] overflow-y-auto shadow-xl"
+        className="w-full max-w-lg rounded-tile bg-paper p-4 sm:p-6 text-ink relative max-h-[90vh] overflow-y-auto shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

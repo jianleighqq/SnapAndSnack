@@ -254,9 +254,9 @@ export default function HardwareStatusPanel({
     (cloudStatus?.status === "ERROR" ? 1 : 0);
 
   return (
-    <Tile tone="surface" className="flex flex-col h-full overflow-hidden">
+    <Tile tone="surface" className="flex flex-col h-auto lg:h-full overflow-visible lg:overflow-hidden rounded-tile">
       {/* Top Header with Summary Pill */}
-      <div className="flex items-center justify-between p-4 border-b border-ink/10">
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3 sm:p-4 border-b border-ink/10">
         <div className="flex items-center gap-2">
           <h2 className="font-display text-xl uppercase tracking-tight text-ink">
             Hardware Status
@@ -280,8 +280,8 @@ export default function HardwareStatusPanel({
 
       {/* Selected Event Action Bar */}
       {selectedEvent && (
-        <div className="bg-paper/60 border-b border-ink/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
+        <div className="bg-paper/60 border-b border-ink/10 px-3 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
             <Label tone="accent">Event:</Label>
             <span className="font-semibold text-ink text-sm uppercase">{selectedEvent.name}</span>
             <span className="font-mono bg-ink/5 px-2 py-0.5 rounded-full text-[11px] font-bold">
@@ -289,12 +289,12 @@ export default function HardwareStatusPanel({
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {selectedEvent.status !== "ACTIVE" && (
               <Pill
                 variant="accent"
                 onClick={() => onSetActive(selectedEvent)}
-                className="gap-1 px-3.5 py-1.5 text-xs min-h-[36px]"
+                className="gap-1 px-3.5 py-1.5 text-xs min-h-[44px] sm:min-h-[36px]"
                 title="Make this the currently active event for booth & queue"
               >
                 <Check className="h-3.5 w-3.5" />
@@ -306,7 +306,7 @@ export default function HardwareStatusPanel({
               <Pill
                 variant="secondary"
                 onClick={() => onCloseEvent(selectedEvent)}
-                className="gap-1 px-3.5 py-1.5 text-xs min-h-[36px]"
+                className="gap-1 px-3.5 py-1.5 text-xs min-h-[44px] sm:min-h-[36px]"
                 title="Mark this event as closed"
               >
                 <Lock className="h-3.5 w-3.5" />
@@ -317,7 +317,7 @@ export default function HardwareStatusPanel({
             <Pill
               variant="secondary"
               onClick={() => onEditEvent(selectedEvent)}
-              className="gap-1 px-3.5 py-1.5 text-xs min-h-[36px]"
+              className="gap-1 px-3.5 py-1.5 text-xs min-h-[44px] sm:min-h-[36px]"
               title="Edit event settings"
             >
               <Edit2 className="h-3.5 w-3.5" />
@@ -328,7 +328,7 @@ export default function HardwareStatusPanel({
               variant="ghost"
               size="icon"
               onClick={() => onDeleteEvent(selectedEvent)}
-              className="h-9 w-9 text-danger hover:bg-danger/10 hover:text-danger"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-danger hover:bg-danger/10 hover:text-danger"
               title="Delete event"
               aria-label="Delete event"
             >
@@ -339,16 +339,16 @@ export default function HardwareStatusPanel({
       )}
 
       {/* Cards Scrollable Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 lg:overflow-y-auto p-3 sm:p-4 space-y-4">
         {/* CARD: Guest Registration */}
-        <Tile tone="paper" className="p-5 shadow-xs">
-          <div className="flex items-start justify-between gap-3 mb-4">
+        <Tile tone="paper" className="p-4 sm:p-5 shadow-xs rounded-tile">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-surface rounded-full text-ink">
+              <div className="p-2.5 sm:p-3 bg-surface rounded-full text-ink shrink-0">
                 <ClipboardList className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-lg uppercase tracking-tight text-ink">
                     Registration
                   </h3>
@@ -372,7 +372,7 @@ export default function HardwareStatusPanel({
               <Pill
                 variant={isCopied ? "primary" : "secondary"}
                 onClick={handleCopyLink}
-                className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+                className="gap-1.5 text-xs min-h-[44px] sm:min-h-[38px] px-3.5 w-full sm:w-auto justify-center shrink-0"
               >
                 {isCopied ? (
                   <>
@@ -467,14 +467,14 @@ export default function HardwareStatusPanel({
         </Tile>
 
         {/* CARD 1: Camera */}
-        <Tile tone="paper" className="p-5 shadow-xs">
-          <div className="flex items-start justify-between gap-3 mb-4">
+        <Tile tone="paper" className="p-4 sm:p-5 shadow-xs rounded-tile">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-surface rounded-full text-ink">
+              <div className="p-2.5 sm:p-3 bg-surface rounded-full text-ink shrink-0">
                 <Camera className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-lg uppercase tracking-tight text-ink">
                     Camera
                   </h3>
@@ -499,7 +499,7 @@ export default function HardwareStatusPanel({
               variant="secondary"
               disabled={isCapturing}
               onClick={handleTestCapture}
-              className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+              className="gap-1.5 text-xs min-h-[44px] sm:min-h-[38px] px-3.5 w-full sm:w-auto justify-center shrink-0"
             >
               <RotateCw className={`h-3.5 w-3.5 ${isCapturing ? "animate-spin" : ""}`} />
               <span>{isCapturing ? "Capturing..." : "Test Capture"}</span>
@@ -507,7 +507,7 @@ export default function HardwareStatusPanel({
           </div>
 
           {/* Camera in use selector */}
-          <div className="flex items-center gap-3 pt-3 border-t border-ink/10 text-xs">
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-ink/10 text-xs">
             <Label tone="ink">Camera in use:</Label>
             <select
               id="camera-select"
@@ -568,14 +568,14 @@ export default function HardwareStatusPanel({
         </Tile>
 
         {/* CARD 2: Printer */}
-        <Tile tone="paper" className="p-5 shadow-xs">
-          <div className="flex items-start justify-between gap-3 mb-4">
+        <Tile tone="paper" className="p-4 sm:p-5 shadow-xs rounded-tile">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-surface rounded-full text-ink">
+              <div className="p-2.5 sm:p-3 bg-surface rounded-full text-ink shrink-0">
                 <Printer className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-lg uppercase tracking-tight text-ink">
                     Printer
                   </h3>
@@ -600,7 +600,7 @@ export default function HardwareStatusPanel({
               variant="secondary"
               disabled={isPrinting}
               onClick={handleTestPrint}
-              className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+              className="gap-1.5 text-xs min-h-[44px] sm:min-h-[38px] px-3.5 w-full sm:w-auto justify-center shrink-0"
             >
               <RotateCw className={`h-3.5 w-3.5 ${isPrinting ? "animate-spin" : ""}`} />
               <span>{isPrinting ? "Printing..." : "Test Print"}</span>
@@ -682,14 +682,14 @@ export default function HardwareStatusPanel({
         </Tile>
 
         {/* CARD 3: Network & Cloud */}
-        <Tile tone="paper" className="p-5 shadow-xs">
-          <div className="flex items-start justify-between gap-3 mb-4">
+        <Tile tone="paper" className="p-4 sm:p-5 shadow-xs rounded-tile">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-surface rounded-full text-ink">
+              <div className="p-2.5 sm:p-3 bg-surface rounded-full text-ink shrink-0">
                 <Cloud className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-lg uppercase tracking-tight text-ink">
                     Network &amp; Cloud
                   </h3>
@@ -714,7 +714,7 @@ export default function HardwareStatusPanel({
               variant="secondary"
               disabled={isRecheckingCloud}
               onClick={handleRecheckCloud}
-              className="gap-1.5 text-xs min-h-[38px] px-3.5 shrink-0"
+              className="gap-1.5 text-xs min-h-[44px] sm:min-h-[38px] px-3.5 w-full sm:w-auto justify-center shrink-0"
             >
               <RotateCw className={`h-3.5 w-3.5 ${isRecheckingCloud ? "animate-spin" : ""}`} />
               <span>{isRecheckingCloud ? "Checking..." : "Recheck"}</span>

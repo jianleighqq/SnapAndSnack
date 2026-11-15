@@ -56,11 +56,11 @@ export default function AddGuestModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md rounded-tile bg-paper p-6 text-ink shadow-xl"
+        className="relative w-full max-w-md rounded-tile bg-paper p-4 sm:p-6 text-ink shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
