@@ -30,11 +30,18 @@ interface GalleryStrip {
   created_at: string;
 }
 
+interface GalleryGif {
+  id: string;
+  signed_url: string | null;
+  created_at: string;
+}
+
 interface GalleryData {
   event_name: string;
   first_name: string;
   queue_number: number | null;
   strip: GalleryStrip | null;
+  gif?: GalleryGif | null;
   photos: GalleryPhoto[];
 }
 
@@ -154,8 +161,8 @@ export default function GuestGalleryView() {
     );
   }
 
-  const { event_name, first_name, queue_number, strip, photos } = data;
-  const hasPhotos = (strip && strip.signed_url) || photos.length > 0;
+  const { event_name, first_name, queue_number, strip, gif, photos } = data;
+  const hasPhotos = (strip && strip.signed_url) || (gif && gif.signed_url) || photos.length > 0;
   const queueLabel = queue_number ? `#${String(queue_number).padStart(2, "0")}` : "";
 
   return (
@@ -249,6 +256,54 @@ export default function GuestGalleryView() {
                     <>
                       <Download className="h-4 w-4" />
                       <span>Download Full Strip</span>
+                    </>
+                  )}
+                </Pill>
+              </div>
+            </Tile>
+          </div>
+        )}
+
+        {/* Section: Animated GIF Slideshow */}
+        {gif && gif.signed_url && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <Label tone="accent">Animated GIF</Label>
+              <span className="font-mono text-[10px] text-muted uppercase">Looping Slideshow</span>
+            </div>
+
+            <Tile tone="surface" className="p-3 rounded-tile shadow-sm border border-ink/10 flex flex-col items-center">
+              <div className="relative aspect-[4/3] w-full max-w-[280px] overflow-hidden rounded-xl border border-ink/10 bg-black/5 p-1 shadow-md flex items-center justify-center">
+                <img
+                  src={gif.signed_url}
+                  alt="Animated GIF slideshow"
+                  className="h-full w-full object-contain rounded-lg"
+                />
+              </div>
+
+              <div className="w-full pt-4">
+                <Pill
+                  variant="primary"
+                  size="md"
+                  disabled={downloadingId === gif.id}
+                  onClick={() =>
+                    handleDownload(
+                      gif.signed_url!,
+                      `snap-and-snack-${queue_number || "guest"}.gif`,
+                      gif.id
+                    )
+                  }
+                  className="w-full min-h-[46px] uppercase font-mono text-xs tracking-wider gap-2"
+                >
+                  {downloadingId === gif.id ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span>Downloading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" />
+                      <span>Download GIF</span>
                     </>
                   )}
                 </Pill>

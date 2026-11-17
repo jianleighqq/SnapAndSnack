@@ -26,6 +26,11 @@ interface OperatorGuestGallery {
     signed_url: string | null;
     created_at: string;
   } | null;
+  gif?: {
+    id: string;
+    signed_url: string | null;
+    created_at: string;
+  } | null;
   photos: {
     id: string;
     shot_number: number;
@@ -177,20 +182,35 @@ export default function OperatorGalleryPage() {
 
                     {/* Image Previews */}
                     <div className="grid grid-cols-[1fr_2fr] gap-3 pt-3">
-                      {/* Strip Preview */}
-                      <div className="flex flex-col items-center">
-                        <Label className="text-[9px] mb-1 text-muted uppercase">Strip</Label>
-                        <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-ink/10 bg-white p-0.5 shadow-xs flex items-center justify-center">
-                          {g.strip?.signed_url ? (
-                            <img
-                              src={g.strip.signed_url}
-                              alt="Photostrip"
-                              className="h-full w-full object-contain rounded"
-                            />
-                          ) : (
-                            <span className="text-[10px] font-mono text-muted">No strip</span>
-                          )}
+                      {/* Strip / GIF Preview */}
+                      <div className="flex flex-col items-center space-y-2">
+                        <div className="w-full flex flex-col items-center">
+                          <Label className="text-[9px] mb-1 text-muted uppercase">Strip</Label>
+                          <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-ink/10 bg-white p-0.5 shadow-xs flex items-center justify-center">
+                            {g.strip?.signed_url ? (
+                              <img
+                                src={g.strip.signed_url}
+                                alt="Photostrip"
+                                className="h-full w-full object-contain rounded"
+                              />
+                            ) : (
+                              <span className="text-[10px] font-mono text-muted">No strip</span>
+                            )}
+                          </div>
                         </div>
+
+                        {g.gif?.signed_url && (
+                          <div className="w-full flex flex-col items-center pt-1 border-t border-ink/5">
+                            <Label className="text-[9px] mb-1 text-accent uppercase font-bold">GIF</Label>
+                            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-ink/10 bg-black/5 p-0.5 shadow-xs flex items-center justify-center">
+                              <img
+                                src={g.gif.signed_url}
+                                alt="Animated GIF"
+                                className="h-full w-full object-contain rounded"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Individual Photos Thumbnails */}

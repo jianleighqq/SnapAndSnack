@@ -49,6 +49,7 @@ export default function EventModal({
   const [maxRetakes, setMaxRetakes] = useState<number>(2);
   const [printLayout, setPrintLayout] = useState<PrintLayout>("STRIP");
   const [maxPrintsPerGuest, setMaxPrintsPerGuest] = useState<number>(1);
+  const [includeGif, setIncludeGif] = useState<boolean>(false);
   const [eventCode, setEventCode] = useState("");
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -75,6 +76,7 @@ export default function EventModal({
       setMaxRetakes(eventToEdit.max_retakes ?? 2);
       setPrintLayout(eventToEdit.print_layout || "STRIP");
       setMaxPrintsPerGuest(eventToEdit.max_prints_per_guest ?? 1);
+      setIncludeGif(eventToEdit.include_gif ?? false);
       setEventCode(eventToEdit.event_code);
       setCodeManuallyEdited(true);
     } else {
@@ -92,6 +94,7 @@ export default function EventModal({
       setMaxRetakes(2);
       setPrintLayout("STRIP");
       setMaxPrintsPerGuest(1);
+      setIncludeGif(false);
       setEventCode("SNAP26");
       setCodeManuallyEdited(false);
     }
@@ -143,6 +146,7 @@ export default function EventModal({
       max_retakes: Number(maxRetakes),
       print_layout: printLayout,
       max_prints_per_guest: Number(maxPrintsPerGuest || 1),
+      include_gif: includeGif,
     };
 
     const validation = validateEventInput(inputData);
@@ -432,6 +436,37 @@ export default function EventModal({
               <span className="block mt-1 text-[11px] text-muted">
                 {maxPrintsPerGuest === 1 ? "1 print per session (default)" : `${maxPrintsPerGuest} prints allowed per guest`}
               </span>
+            </div>
+
+            {/* Animated GIF Slideshow Toggle */}
+            <div className="pt-2 border-t border-ink/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label as="label" className="text-ink block">
+                    Include animated GIF
+                  </Label>
+                  <span className="text-[11px] text-muted block mt-0.5">
+                    Generate a looping slideshow GIF from kept shots
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={includeGif}
+                  onClick={() => setIncludeGif(!includeGif)}
+                  className={cn(
+                    "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                    includeGif ? "bg-accent" : "bg-ink/20"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block h-6 w-6 transform rounded-full bg-paper shadow-md transition duration-200 ease-in-out",
+                      includeGif ? "translate-x-5" : "translate-x-0"
+                    )}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 

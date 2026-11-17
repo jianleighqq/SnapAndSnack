@@ -11,6 +11,7 @@ export interface BoothGuestContext {
     max_retakes: number;
     print_layout: string;
     max_prints_per_guest: number;
+    include_gif?: boolean;
     start_time: string;
   };
   queueEntry: {
@@ -106,6 +107,7 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
       max_retakes: activeEvent.max_retakes ?? 2,
       print_layout: activeEvent.print_layout ?? "STRIP",
       max_prints_per_guest: activeEvent.max_prints_per_guest ?? 1,
+      include_gif: activeEvent.include_gif ?? false,
       start_time: activeEvent.start_time,
     },
     queueEntry: {

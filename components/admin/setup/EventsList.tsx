@@ -173,6 +173,12 @@ export default function EventsList({
                       <span>MAX {evt.max_retakes ?? 2} RETAKES</span>
                       <span>·</span>
                       <span className="uppercase">{evt.print_layout || "STRIP"}</span>
+                      {evt.include_gif && (
+                        <>
+                          <span>·</span>
+                          <span className="text-accent font-semibold">GIF</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

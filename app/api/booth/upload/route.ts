@@ -68,9 +68,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (mediaType !== "PHOTO" && mediaType !== "STRIP") {
+    if (mediaType !== "PHOTO" && mediaType !== "STRIP" && mediaType !== "GIF") {
       return NextResponse.json(
-        { error: "Invalid mediaType: must be PHOTO or STRIP" },
+        { error: "Invalid mediaType: must be PHOTO, STRIP, or GIF" },
         { status: 400, headers: { "Cache-Control": "no-store" } }
       );
     }
@@ -121,11 +121,14 @@ export async function POST(request: Request) {
     if (mimeType.includes("png")) extension = "png";
     else if (mimeType.includes("svg")) extension = "svg";
     else if (mimeType.includes("webp")) extension = "webp";
+    else if (mimeType.includes("gif")) extension = "gif";
 
     const timestamp = Date.now();
     const storagePath =
       mediaType === "PHOTO"
         ? `${context.event.id}/${context.guest.id}/shot-${shotNumber || 1}-${timestamp}.${extension}`
+        : mediaType === "GIF"
+        ? `${context.event.id}/${context.guest.id}/animation.gif`
         : `${context.event.id}/${context.guest.id}/strip-${timestamp}.${extension}`;
 
     // Upload to Supabase Storage 'photos' bucket
@@ -211,6 +214,58 @@ export async function POST(request: Request) {
           console.error("[Booth Upload] Failed to insert media asset:", insertErr.message, insertErr.details, insertErr.hint);
           return NextResponse.json(
             { error: "Could not save photo record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = inserted?.id || null;
+      }
+    } else if (mediaType === "GIF") {
+      // GIF: Check existing row for idempotency on Retry Save
+      const { data: existing, error: selectErr } = await supabaseServer
+        .from("media_assets")
+        .select("id")
+        .eq("session_id", targetSessionId)
+        .eq("media_type", "GIF")
+        .limit(1);
+
+      if (selectErr) {
+        console.error("[Booth Upload] Error checking existing GIF asset:", selectErr.message || selectErr);
+      }
+
+      if (existing && existing.length > 0) {
+        const { data: updated, error: updateErr } = await supabaseServer
+          .from("media_assets")
+          .update({
+            storage_path: storagePath,
+          })
+          .eq("id", existing[0].id)
+          .select("id")
+          .single();
+
+        if (updateErr) {
+          console.error("[Booth Upload] Failed to update GIF media asset:", updateErr.message, updateErr.details, updateErr.hint);
+          return NextResponse.json(
+            { error: "Could not save GIF record. Please try again." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+          );
+        }
+        assetId = updated?.id || existing[0].id;
+      } else {
+        const { data: inserted, error: insertErr } = await supabaseServer
+          .from("media_assets")
+          .insert({
+            session_id: targetSessionId,
+            media_type: "GIF",
+            storage_path: storagePath,
+            in_gallery: false,
+          })
+          .select("id")
+          .single();
+
+        if (insertErr) {
+          console.error("[Booth Upload] Failed to insert GIF media asset:", insertErr.message, insertErr.details, insertErr.hint);
+          return NextResponse.json(
+            { error: "Could not save GIF record. Please try again." },
             { status: 500, headers: { "Cache-Control": "no-store" } }
           );
         }

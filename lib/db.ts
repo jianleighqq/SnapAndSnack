@@ -198,6 +198,7 @@ class SupabaseDataStore implements IDataStore {
       max_retakes: eventData.max_retakes ?? 2,
       print_layout: eventData.print_layout ?? "STRIP",
       max_prints_per_guest: eventData.max_prints_per_guest ?? 1,
+      include_gif: eventData.include_gif ?? false,
       status: eventData.status ?? "SCHEDULED",
     };
 

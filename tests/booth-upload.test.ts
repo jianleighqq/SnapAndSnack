@@ -76,6 +76,17 @@ test("media_assets payload validation rejects invalid columns (event_id, guest_i
   const newStripValidation = validateMediaAssetPayload(newValidStripPayload);
   assert.strictEqual(newStripValidation.valid, true);
   assert.strictEqual(newStripValidation.invalidKeys.length, 0);
+
+  const newValidGifPayload = {
+    session_id: "session-789",
+    storage_path: "event-123/guest-456/animation.gif",
+    media_type: "GIF",
+    in_gallery: false,
+  };
+
+  const newGifValidation = validateMediaAssetPayload(newValidGifPayload);
+  assert.strictEqual(newGifValidation.valid, true);
+  assert.strictEqual(newGifValidation.invalidKeys.length, 0);
 });
 
 test("sanitizePoseId accepts valid UUID and rejects mock strings / non-UUIDs", () => {

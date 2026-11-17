@@ -29,6 +29,7 @@ export interface Event {
   max_retakes: number; // default 2 per shot
   print_layout: PrintLayout; // SINGLE | STRIP | GRID
   max_prints_per_guest: number; // 1 to 5, default 1
+  include_gif?: boolean; // Optional animated GIF slideshow of kept shots
   status: EventStatus;
   created_at?: string;
 }

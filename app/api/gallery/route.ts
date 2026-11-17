@@ -92,6 +92,7 @@ export async function GET(request: Request) {
             queue_number: q.queue_number,
             guest_token: q.guests.guest_token,
             strip: null,
+            gif: null,
             photos: [],
           });
         }
@@ -104,6 +105,13 @@ export async function GET(request: Request) {
         const signedUrl = signed?.signedUrl || null;
         if (asset.media_type === "STRIP") {
           guestRecord.strip = {
+            id: asset.id,
+            storage_path: asset.storage_path,
+            signed_url: signedUrl,
+            created_at: asset.created_at,
+          };
+        } else if (asset.media_type === "GIF") {
+          guestRecord.gif = {
             id: asset.id,
             storage_path: asset.storage_path,
             signed_url: signedUrl,
@@ -186,6 +194,7 @@ export async function GET(request: Request) {
         first_name: firstName,
         queue_number: queueNumber,
         strip: null,
+        gif: null,
         photos: [],
       });
     }
@@ -209,6 +218,7 @@ export async function GET(request: Request) {
         first_name: firstName,
         queue_number: queueNumber,
         strip: null,
+        gif: null,
         photos: [],
       });
     }
@@ -229,12 +239,14 @@ export async function GET(request: Request) {
         first_name: firstName,
         queue_number: queueNumber,
         strip: null,
+        gif: null,
         photos: [],
       });
     }
 
     // 6. Generate signed URLs (1 hour)
     let strip: any = null;
+    let gif: any = null;
     const photos: any[] = [];
 
     for (const asset of assets!) {
@@ -246,6 +258,13 @@ export async function GET(request: Request) {
 
       if (asset.media_type === "STRIP") {
         strip = {
+          id: asset.id,
+          storage_path: asset.storage_path,
+          signed_url: signedUrl,
+          created_at: asset.created_at,
+        };
+      } else if (asset.media_type === "GIF") {
+        gif = {
           id: asset.id,
           storage_path: asset.storage_path,
           signed_url: signedUrl,
@@ -265,7 +284,7 @@ export async function GET(request: Request) {
     // Sort photos by shot number
     photos.sort((a, b) => a.shot_number - b.shot_number);
 
-    console.log(`[Gallery] 5. Signed URLs generated: strip=${strip ? "YES" : "NO"}, photos=${photos.length}`);
+    console.log(`[Gallery] 5. Signed URLs generated: strip=${strip ? "YES" : "NO"}, gif=${gif ? "YES" : "NO"}, photos=${photos.length}`);
 
     return NextResponse.json(
       {
@@ -273,6 +292,7 @@ export async function GET(request: Request) {
         first_name: firstName,
         queue_number: queueNumber,
         strip,
+        gif,
         photos,
       },
       {

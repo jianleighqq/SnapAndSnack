@@ -11,6 +11,7 @@ export interface EventFormInput {
   max_retakes?: number;
   print_layout?: PrintLayout;
   max_prints_per_guest?: number;
+  include_gif?: boolean;
 }
 
 export interface ValidationResult {

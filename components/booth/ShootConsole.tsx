@@ -29,6 +29,7 @@ import { Hairline } from "@/components/ui/Hairline";
 import { hardware } from "@/lib/hardware";
 import { composePrintLayout } from "@/lib/layout";
 import { renderTemplateStrip, composeDualPrintSheet } from "@/lib/template-builder";
+import { createAnimatedGif } from "@/lib/gif";
 import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
 import QRCode from "qrcode";
 
@@ -110,6 +111,12 @@ export default function ShootConsole() {
   const [stripMediaAssetId, setStripMediaAssetId] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [saveToastError, setSaveToastError] = useState<string | null>(null);
+
+  // Animated GIF State
+  const [gifDataUrl, setGifDataUrl] = useState<string | null>(null);
+  const [gifStatus, setGifStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
+  const gifDataUrlRef = useRef<string | null>(null);
+  const shouldMakeGif = Boolean(activeEvent?.include_gif);
 
   // Confirmation Modals
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
@@ -372,6 +379,61 @@ export default function ShootConsole() {
     }
   };
 
+  // Upload animated GIF to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
+  const uploadGif = async (imageUrl: string) => {
+    try {
+      const resolvedSessionId = await ensureSessionId();
+
+      const res = await fetch("/api/booth/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: imageUrl,
+          mediaType: "GIF",
+          sessionId: resolvedSessionId,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        console.error("[ShootConsole] GIF upload failed:", errJson);
+      }
+    } catch (err) {
+      console.error("[ShootConsole] Failed to upload animated GIF to storage:", err);
+    }
+  };
+
+  // Generate looping animated GIF from kept shots in browser
+  const generateGuestGif = async () => {
+    if (!shouldMakeGif) return;
+    if (gifStatus === "generating" || gifStatus === "done") return;
+    setGifStatus("generating");
+
+    try {
+      const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
+      const images = currentList.map((s) => s?.image).filter(Boolean);
+      if (images.length === 0) {
+        setGifStatus("error");
+        return;
+      }
+
+      const result = await createAnimatedGif(images, {
+        width: 480,
+        paletteColors: 256,
+        frameDelayMs: 700,
+        lastFramePauseMs: 500,
+        maxBytes: 3 * 1024 * 1024,
+      });
+
+      setGifDataUrl(result.dataUrl);
+      gifDataUrlRef.current = result.dataUrl;
+      setGifStatus("done");
+    } catch (err) {
+      console.warn("[ShootConsole] GIF generation failed:", err);
+      setGifStatus("error");
+    }
+  };
+
   // Tapping a pose tile fills the active slot and advances to the next empty slot
   const handleSelectPoseForActiveSlot = (poseId: string) => {
     setSelectedPoses((prev) => {
@@ -610,6 +672,9 @@ export default function ShootConsole() {
       setComposedImageUrl(composed);
       uploadComposedStrip(composed);
       setPreviewMode("summary");
+      if (shouldMakeGif) {
+        generateGuestGif();
+      }
     }
   };
 
@@ -623,8 +688,22 @@ export default function ShootConsole() {
     if (composed) {
       uploadComposedStrip(composed);
     }
+    if (shouldMakeGif && gifStatus === "idle") {
+      generateGuestGif();
+    }
     setStep("output");
   };
+
+  // Trigger background GIF creation as soon as reviewing finishes and output/summary is reached
+  useEffect(() => {
+    if (
+      (step === "output" || (step === "preview" && previewMode === "summary")) &&
+      shouldMakeGif &&
+      gifStatus === "idle"
+    ) {
+      generateGuestGif();
+    }
+  }, [step, previewMode, shouldMakeGif, gifStatus]);
 
   // Step 4: Hardware Print action
   const handlePrint = async () => {
@@ -738,6 +817,21 @@ export default function ShootConsole() {
         await uploadComposedStrip(currentStrip);
       }
 
+      // 2b. Ensure animated GIF is uploaded if enabled
+      let currentGif = gifDataUrlRef.current || gifDataUrl;
+      if (!currentGif && shouldMakeGif && gifStatus === "generating") {
+        for (let i = 0; i < 15; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          if (gifDataUrlRef.current) {
+            currentGif = gifDataUrlRef.current;
+            break;
+          }
+        }
+      }
+      if (currentGif) {
+        await uploadGif(currentGif);
+      }
+
       // 3. Mark in_gallery = true via backend API
       const currentSessionId = await ensureSessionId();
       const res = await fetch("/api/booth/gallery", {
@@ -803,6 +897,9 @@ export default function ShootConsole() {
     setShowCancelPrompt(false);
     setShowRetakeAllPrompt(false);
     setComposedImageUrl(null);
+    setGifDataUrl(null);
+    gifDataUrlRef.current = null;
+    setGifStatus("idle");
     setPrintStatus("idle");
     setGalleryStatus("idle");
     setShowQrTile(false);
@@ -1532,7 +1629,7 @@ export default function ShootConsole() {
 
         {/* STEP 4: OUTPUT */}
         {step === "output" && (
-          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col items-center justify-between space-y-3 animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl xl:max-w-6xl 2xl:max-w-7xl flex-col items-center justify-between space-y-3 animate-fadeIn">
             <div className="text-center space-y-1">
               <Label tone="accent">Step 04 · Collect</Label>
               <h2 className="font-display text-[clamp(26px,4.5vh,48px)] uppercase tracking-tight leading-tight">
@@ -1545,9 +1642,10 @@ export default function ShootConsole() {
 
             {/* Center Content: Composed 4x6 Canvas + Action Tiles */}
             <div className="grid w-full flex-1 grid-cols-1 md:grid-cols-[auto_1fr] gap-4 sm:gap-6 items-center justify-center max-h-none md:max-h-[50vh] overflow-visible md:overflow-hidden py-1">
-              {/* Composed 4x6 Layout Preview */}
-              <div className="flex justify-center h-full max-h-[38vh] sm:max-h-[46vh]">
-                <div className="relative aspect-[2/3] h-full max-h-[38vh] sm:max-h-[46vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1">
+              {/* Previews: Composed Strip + Optional Looping GIF */}
+              <div className="flex items-center justify-center gap-2 sm:gap-3 h-full max-h-[38vh] sm:max-h-[46vh] shrink-0">
+                {/* Composed 4x6 Layout Preview */}
+                <div className="relative aspect-[2/3] h-full max-h-[38vh] sm:max-h-[46vh] overflow-hidden rounded-tile border border-ink/15 shadow-xl bg-white p-1 shrink-0">
                   {composedImageUrl && (
                     <img
                       src={composedImageUrl}
@@ -1556,16 +1654,51 @@ export default function ShootConsole() {
                     />
                   )}
                 </div>
+
+                {/* Looping Animated GIF Preview - Narrower width to leave ample room for action cards */}
+                {shouldMakeGif && (
+                  <div className="relative flex flex-col items-center justify-center h-full max-h-[38vh] sm:max-h-[46vh] w-32 sm:w-40 md:w-44 max-w-[190px] rounded-tile border border-ink/15 shadow-xl bg-paper p-2 overflow-hidden text-center shrink-0">
+                    {gifStatus === "generating" && (
+                      <div className="flex flex-col items-center justify-center p-3 space-y-2 text-muted">
+                        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+                        <span className="font-mono text-[11px] uppercase tracking-wider text-ink font-semibold">
+                          Making your GIF...
+                        </span>
+                      </div>
+                    )}
+
+                    {gifStatus === "done" && gifDataUrl && (
+                      <div className="relative h-full w-full flex flex-col items-center justify-center">
+                        <img
+                          src={gifDataUrl}
+                          alt="Looping animated GIF"
+                          className="h-full w-full object-contain rounded-lg shadow-sm"
+                        />
+                        <span className="absolute bottom-1 right-1 bg-ink/80 text-paper px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider">
+                          GIF
+                        </span>
+                      </div>
+                    )}
+
+                    {gifStatus === "error" && (
+                      <div className="flex flex-col items-center justify-center p-3 text-muted">
+                        <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
+                          GIF unavailable
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Three Output Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 h-full max-h-none md:max-h-[46vh] items-stretch">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 h-full max-h-none md:max-h-[46vh] items-stretch min-w-0">
                 {/* PRINT ACTION */}
                 <Tile
                   tone="surface"
-                  className="flex flex-col items-center justify-between p-4 text-center rounded-tile border border-ink/5"
+                  className="flex flex-col items-center justify-between p-3 sm:p-4 text-center rounded-tile border border-ink/5 min-w-0"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1 shrink-0">
                     <Printer className="h-5 w-5 text-accent" />
                   </div>
                   <div>
@@ -1579,9 +1712,9 @@ export default function ShootConsole() {
                         variant="primary"
                         size="md"
                         onClick={handlePrint}
-                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                       >
-                        <Printer className="h-4 w-4" />
+                        <Printer className="h-4 w-4 shrink-0" />
                         <span>Print</span>
                       </Pill>
                     )}
@@ -1591,9 +1724,9 @@ export default function ShootConsole() {
                         variant="secondary"
                         size="md"
                         disabled
-                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                       >
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                         <span>Printing...</span>
                       </Pill>
                     )}
@@ -1603,9 +1736,9 @@ export default function ShootConsole() {
                         variant="secondary"
                         size="md"
                         disabled
-                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px] opacity-80 cursor-not-allowed"
+                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight opacity-80 cursor-not-allowed"
                       >
-                        <Check className="h-4 w-4 text-success" />
+                        <Check className="h-4 w-4 text-success shrink-0" />
                         <span>Printed</span>
                       </Pill>
                     )}
@@ -1619,9 +1752,9 @@ export default function ShootConsole() {
                           variant="danger"
                           size="md"
                           onClick={handlePrint}
-                          className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                          className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                         >
-                          <RotateCcw className="h-3.5 w-3.5" />
+                          <RotateCcw className="h-3.5 w-3.5 shrink-0" />
                           <span>Retry Print</span>
                         </Pill>
                       </div>
@@ -1632,9 +1765,9 @@ export default function ShootConsole() {
                 {/* SHARE BY QR ACTION */}
                 <Tile
                   tone="surface"
-                  className="flex flex-col items-center justify-between p-4 text-center rounded-tile border border-ink/5"
+                  className="flex flex-col items-center justify-between p-3 sm:p-4 text-center rounded-tile border border-ink/5 min-w-0"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1 shrink-0">
                     <QrCode className="h-5 w-5 text-accent" />
                   </div>
                   <div>
@@ -1647,9 +1780,9 @@ export default function ShootConsole() {
                       variant={showQrTile ? "primary" : "secondary"}
                       size="md"
                       onClick={() => setShowQrTile((prev) => !prev)}
-                      className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                      className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                     >
-                      <QrCode className="h-4 w-4" />
+                      <QrCode className="h-4 w-4 shrink-0" />
                       <span>{showQrTile ? "Hide QR" : "Show QR"}</span>
                     </Pill>
                   </div>
@@ -1658,9 +1791,9 @@ export default function ShootConsole() {
                 {/* SAVE TO GALLERY ACTION */}
                 <Tile
                   tone="surface"
-                  className="flex flex-col items-center justify-between p-4 text-center rounded-tile border border-ink/5"
+                  className="flex flex-col items-center justify-between p-3 sm:p-4 text-center rounded-tile border border-ink/5 min-w-0"
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1 shrink-0">
                     <CloudUpload className="h-5 w-5 text-accent" />
                   </div>
                   <div>
@@ -1674,9 +1807,9 @@ export default function ShootConsole() {
                         variant="secondary"
                         size="md"
                         onClick={handleSaveToGallery}
-                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                       >
-                        <CloudUpload className="h-4 w-4" />
+                        <CloudUpload className="h-4 w-4 shrink-0" />
                         <span>Save to Gallery</span>
                       </Pill>
                     )}
@@ -1686,31 +1819,31 @@ export default function ShootConsole() {
                         variant="secondary"
                         size="md"
                         disabled
-                        className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px]"
+                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
                       >
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                         <span>Saving...</span>
                       </Pill>
                     )}
 
                     {galleryStatus === "done" && (
-                      <div className="inline-flex min-h-[44px] items-center justify-center gap-1.5 w-full text-xs font-mono font-bold text-success uppercase">
-                        <Check className="h-4 w-4" /> Saved
+                      <div className="inline-flex min-h-[44px] items-center justify-center gap-1.5 w-full text-[11px] sm:text-xs font-mono font-bold text-success uppercase">
+                        <Check className="h-4 w-4 shrink-0" /> Saved
                       </div>
                     )}
 
                     {galleryStatus === "failed" && (
                       <div className="flex flex-col items-center gap-1.5 w-full">
-                        <div className="inline-flex items-center justify-center gap-1.5 w-full text-xs font-mono font-bold text-danger uppercase">
-                          <AlertTriangle className="h-4 w-4" /> Save Failed
+                        <div className="inline-flex items-center justify-center gap-1.5 w-full text-[11px] sm:text-xs font-mono font-bold text-danger uppercase">
+                          <AlertTriangle className="h-4 w-4 shrink-0" /> Save Failed
                         </div>
                         <Pill
                           variant="secondary"
                           size="md"
                           onClick={handleSaveToGallery}
-                          className="w-full uppercase font-mono text-xs tracking-wider min-h-[44px] text-danger border-danger/30 hover:bg-danger/10"
+                          className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight text-danger border-danger/30 hover:bg-danger/10"
                         >
-                          <CloudUpload className="h-4 w-4" />
+                          <CloudUpload className="h-4 w-4 shrink-0" />
                           <span>Retry Save</span>
                         </Pill>
                       </div>
