@@ -8,6 +8,7 @@ import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
 import { cn } from "@/components/ui/cn";
+import { Modal } from "@/components/ui/Modal";
 
 interface EventModalProps {
   isOpen: boolean;
@@ -168,12 +169,11 @@ export default function EventModal({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="event-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/30 backdrop-blur-sm overflow-y-auto"
-      onClick={onClose}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      ariaLabelledBy="event-modal-title"
+      zIndex="z-50"
     >
       <div
         className="w-full max-w-lg rounded-tile bg-paper p-4 sm:p-6 text-ink relative max-h-[90vh] overflow-y-auto shadow-xl"
@@ -517,6 +517,6 @@ export default function EventModal({
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

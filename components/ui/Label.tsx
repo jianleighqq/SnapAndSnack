@@ -1,12 +1,13 @@
 import React from "react";
 import { cn } from "./cn";
 
-type LabelTone = "muted" | "ink" | "accent" | "inherit";
+type LabelTone = "muted" | "ink" | "accent" | "danger" | "inherit";
 
 const tones: Record<LabelTone, string> = {
   muted: "text-muted",
   ink: "text-ink",
   accent: "text-accent",
+  danger: "text-danger",
   inherit: "",
 };
 

@@ -1,14 +1,15 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Lock } from "lucide-react";
+import { Camera, Lock, Loader2 } from "lucide-react";
 import type { Event, QueueEntryWithGuest } from "@/lib/types";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Tile } from "@/components/ui/Tile";
 import { Hairline } from "@/components/ui/Hairline";
 import { Ticker } from "@/components/ui/Ticker";
+import { Modal } from "@/components/ui/Modal";
 
 interface BoothAttractScreenProps {
   event: Event | null;
@@ -23,23 +24,101 @@ export default function BoothAttractScreen({
 }: BoothAttractScreenProps) {
   const router = useRouter();
   const [currentEvent] = useState<Event | null>(event);
+  const [isChecking, setIsChecking] = useState(false);
+  const [showNoGuestModal, setShowNoGuestModal] = useState(false);
 
-  // Trigger navigation directly to shoot screen
-  const handleStartShooting = () => {
-    router.push("/booth/shoot");
-  };
+  // Request counter to ignore out-of-order responses
+  const checkRequestIdRef = useRef<number>(0);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if a guest is currently in progress before navigating to the shoot console
+  const handleStartShooting = useCallback(async () => {
+    if (isChecking) return;
+    setIsChecking(true);
+
+    const requestId = ++checkRequestIdRef.current;
+
+    try {
+      const res = await fetch("/api/booth/current", { cache: "no-store" });
+      if (requestId !== checkRequestIdRef.current) return;
+
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data?.guest) {
+          router.push("/booth/shoot");
+          return;
+        }
+      }
+
+      // 409 or no guest: Show waiting modal directly on attract screen without flashing step screens
+      setShowNoGuestModal(true);
+    } catch (err) {
+      console.warn("Could not check current booth guest:", err);
+      // On network failure, also show waiting state
+      setShowNoGuestModal(true);
+    } finally {
+      if (requestId === checkRequestIdRef.current) {
+        setIsChecking(false);
+      }
+    }
+  }, [isChecking, router]);
+
+  // While "No guest" modal is open, poll /api/booth/current every 3 seconds
+  // Stop polling when page is hidden; ignore out-of-order responses
+  useEffect(() => {
+    if (!showNoGuestModal) {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      return;
+    }
+
+    const pollCurrentGuest = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+
+      const requestId = ++checkRequestIdRef.current;
+      try {
+        const res = await fetch("/api/booth/current", { cache: "no-store" });
+        if (requestId !== checkRequestIdRef.current) return;
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data?.guest) {
+            setShowNoGuestModal(false);
+            router.push("/booth/shoot");
+          }
+        }
+      } catch (err) {
+        console.warn("Poll check error:", err);
+      }
+    };
+
+    pollTimerRef.current = setInterval(pollCurrentGuest, 3000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && showNoGuestModal) {
+        pollCurrentGuest();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [showNoGuestModal, router]);
 
   // Keyboard navigation: Enter or Space starts shooting
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (showNoGuestModal) return;
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        router.push("/booth/shoot");
+        handleStartShooting();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [router]);
+  }, [handleStartShooting, showNoGuestModal]);
 
   const eventTitle = currentEvent?.name?.trim() || "Snap & Snack Event";
 
@@ -107,6 +186,7 @@ export default function BoothAttractScreen({
             <Pill
               variant="primary"
               size="lg"
+              disabled={isChecking}
               onClick={(e) => {
                 e.stopPropagation();
                 handleStartShooting();
@@ -114,8 +194,17 @@ export default function BoothAttractScreen({
               className="animate-soft-pulse w-full min-h-[60px] justify-center text-lg uppercase tracking-wide gap-2.5 shadow-md"
               aria-label="Start Shooting Photo Booth"
             >
-              <Camera className="h-6 w-6 shrink-0" />
-              <span>Start Shooting</span>
+              {isChecking ? (
+                <>
+                  <Loader2 className="h-6 w-6 animate-spin shrink-0" />
+                  <span>Checking Booth...</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="h-6 w-6 shrink-0" />
+                  <span>Start Shooting</span>
+                </>
+              )}
             </Pill>
             <Label className="text-muted text-[11px]">Tap anywhere to begin</Label>
           </div>
@@ -137,6 +226,7 @@ export default function BoothAttractScreen({
               <Pill
                 variant="primary"
                 size="lg"
+                disabled={isChecking}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleStartShooting();
@@ -144,8 +234,17 @@ export default function BoothAttractScreen({
                 className="animate-soft-pulse min-h-[72px] px-9 text-xl lg:min-h-[88px] lg:px-12 lg:text-2xl"
                 aria-label="Start Shooting Photo Booth"
               >
-                <Camera className="h-6 w-6 shrink-0 lg:h-7 lg:w-7" />
-                <span>Start Shooting</span>
+                {isChecking ? (
+                  <>
+                    <Loader2 className="h-6 w-6 animate-spin shrink-0 lg:h-7 lg:w-7" />
+                    <span>Checking...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="h-6 w-6 shrink-0 lg:h-7 lg:w-7" />
+                    <span>Start Shooting</span>
+                  </>
+                )}
               </Pill>
               <Hairline strong className="w-6 shrink-0 lg:w-10" />
             </div>
@@ -191,6 +290,47 @@ export default function BoothAttractScreen({
           <Ticker className="pt-3 sm:pt-4" items={["Snap", "Smile", "Snack", "Repeat"]} />
         </div>
       </footer>
+
+      {/* NO GUEST IS BEING CALLED MODAL */}
+      <Modal
+        isOpen={showNoGuestModal}
+        onClose={() => setShowNoGuestModal(false)}
+        ariaLabel="Booth waiting for guest"
+        zIndex="z-50"
+      >
+        <Tile
+          tone="surface"
+          className="max-w-md w-full p-6 sm:p-8 text-center space-y-4 shadow-2xl border border-ink/10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-14 h-14 mx-auto rounded-full bg-paper flex items-center justify-center text-accent">
+            <Camera className="w-7 h-7" />
+          </div>
+          <div>
+            <Label className="block mb-1">Booth Waiting</Label>
+            <h2 className="font-display text-3xl uppercase tracking-tight text-ink">
+              No guest is being called
+            </h2>
+          </div>
+          <p className="text-sm text-muted">
+            The operator has not called a guest to the booth yet. Use Call Next on the Queue Board to begin a session.
+          </p>
+          <div className="pt-2 flex flex-col items-center gap-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-muted">
+              <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+              <span>Waiting for operator... will start automatically</span>
+            </div>
+            <Pill
+              variant="secondary"
+              size="md"
+              onClick={() => setShowNoGuestModal(false)}
+              className="uppercase tracking-wider font-mono text-xs min-h-[44px]"
+            >
+              Back to Home
+            </Pill>
+          </div>
+        </Tile>
+      </Modal>
     </div>
   );
 }

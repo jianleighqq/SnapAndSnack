@@ -26,6 +26,7 @@ import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Tile } from "@/components/ui/Tile";
 import { Hairline } from "@/components/ui/Hairline";
+import { Modal } from "@/components/ui/Modal";
 import { hardware } from "@/lib/hardware";
 import { composePrintLayout } from "@/lib/layout";
 import { renderTemplateStrip, composeDualPrintSheet } from "@/lib/template-builder";
@@ -36,6 +37,7 @@ import QRCode from "qrcode";
 export type ShootStep = "choose" | "countdown" | "preview" | "output";
 export type CaptureType = "Photo" | "GIF" | "Video";
 export type PreviewMode = "single" | "summary";
+export type BoothStatus = "loading" | "ready" | "no_guest" | "error";
 
 export const POSE_PREVIEW_PAUSE_MS = 3000;
 
@@ -64,7 +66,10 @@ export default function ShootConsole() {
   // Active event & queue data
   const [activeEvent, setActiveEvent] = useState<Event | null>(null);
   const [activeEntry, setActiveEntry] = useState<QueueEntryWithGuest | null>(null);
-  const [isLoadingGuest, setIsLoadingGuest] = useState(true);
+  const [boothStatus, setBoothStatus] = useState<BoothStatus>("loading");
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const boothRequestIdRef = useRef<number>(0);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Step state
   const [step, setStep] = useState<ShootStep>("choose");
@@ -141,18 +146,38 @@ export default function ShootConsole() {
   }, [totalShots, maxRetakesAllowed]);
 
   // 1. Fetch current booth guest & event from public scoped endpoint
-  const fetchCurrentBooth = async (isMounted = true) => {
+  const fetchCurrentBooth = async (isMounted = true, isPoll = false) => {
+    const requestId = ++boothRequestIdRef.current;
+    if (!isPoll) {
+      setBoothStatus((prev) => (prev === "no_guest" ? "no_guest" : "loading"));
+    }
+
     try {
       const res = await fetch("/api/booth/current", { cache: "no-store" });
-      if (res.status === 409 || !res.ok) {
-        if (isMounted) {
-          setActiveEntry(null);
-          setIsLoadingGuest(false);
+      if (requestId !== boothRequestIdRef.current || !isMounted) return;
+
+      if (res.status === 409) {
+        setActiveEntry(null);
+        setBoothStatus("no_guest");
+        return;
+      }
+
+      if (!res.ok) {
+        if (!activeEntry) {
+          setBoothStatus("error");
+          setStatusError("Can't reach the booth server, retrying...");
         }
         return;
       }
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (requestId !== boothRequestIdRef.current || !isMounted) return;
+
+      if (!data?.guest) {
+        setActiveEntry(null);
+        setBoothStatus("no_guest");
+        return;
+      }
       if (!isMounted) return;
 
       if (data.event) {
@@ -183,7 +208,6 @@ export default function ShootConsole() {
             guest_token: "",
           },
         });
-        setIsLoadingGuest(false);
       }
 
       if (data.qrUrl) {
@@ -225,11 +249,15 @@ export default function ShootConsole() {
       } catch (pErr) {
         console.warn("Could not check print limit:", pErr);
       }
+
+      setBoothStatus("ready");
     } catch (err) {
       console.error("Error setting up shoot guest:", err);
-      if (isMounted) {
-        setActiveEntry(null);
-        setIsLoadingGuest(false);
+      if (requestId === boothRequestIdRef.current && isMounted) {
+        if (!activeEntry) {
+          setBoothStatus("error");
+          setStatusError("Can't reach the booth server, retrying...");
+        }
       }
     }
   };
@@ -270,6 +298,35 @@ export default function ShootConsole() {
       hardware.stopStream?.();
     };
   }, []);
+
+  // Poll /api/booth/current every 3 seconds while on "no_guest" or "error"
+  // Pauses when document is hidden; ignores out-of-order responses
+  useEffect(() => {
+    if (boothStatus !== "no_guest" && boothStatus !== "error") {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      return;
+    }
+
+    const poll = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchCurrentBooth(true, true);
+    };
+
+    pollTimerRef.current = setInterval(poll, 3000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && (boothStatus === "no_guest" || boothStatus === "error")) {
+        fetchCurrentBooth(true, true);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [boothStatus]);
 
   // Connect live camera stream to the viewfinder video element during countdown
   useEffect(() => {
@@ -919,10 +976,37 @@ export default function ShootConsole() {
 
   const CurrentPoseIcon = currentPoseInfo.icon;
 
-  if (!isLoadingGuest && !activeEntry) {
+  // 1. Loading state: neutral editorial full-screen loading view, NEVER render step screens
+  if (boothStatus === "loading") {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center bg-paper text-ink p-6">
-        <Tile tone="surface" className="max-w-md w-full p-8 text-center space-y-4">
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-paper text-ink p-6 select-none animate-fadeIn">
+        <div className="flex flex-col items-center space-y-4 text-center max-w-sm">
+          <img
+            src="/logo.png"
+            alt="Snap & Snack logo"
+            className="h-12 w-auto object-contain opacity-90 animate-pulse"
+          />
+          <div className="space-y-1.5">
+            <h2 className="font-display text-2xl uppercase tracking-wide">
+              Snap &amp; Snack
+            </h2>
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              <p className="font-mono text-xs uppercase tracking-widest text-muted">
+                Getting the booth ready...
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. No Guest Called state: 409 means "no guest", renders "No guest is being called" card directly
+  if (boothStatus === "no_guest" || !activeEntry) {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-paper text-ink p-6 animate-fadeIn">
+        <Tile tone="surface" className="max-w-md w-full p-8 text-center space-y-4 shadow-xl border border-ink/10">
           <div className="w-14 h-14 mx-auto rounded-full bg-paper flex items-center justify-center text-accent">
             <Camera className="w-7 h-7" />
           </div>
@@ -935,15 +1019,65 @@ export default function ShootConsole() {
           <p className="text-sm text-muted">
             The operator has not called a guest to the booth yet. Use Call Next on the Queue Board to begin a session.
           </p>
-          <div className="pt-2 flex justify-center">
+          <div className="pt-2 flex flex-col items-center gap-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-muted">
+              <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+              <span>Waiting for operator... will start automatically</span>
+            </div>
             <Pill
               variant="primary"
               size="lg"
               onClick={() => router.push("/")}
-              className="uppercase tracking-wider font-mono text-xs"
+              className="uppercase tracking-wider font-mono text-xs min-h-[44px]"
             >
               Back to Home
             </Pill>
+          </div>
+        </Tile>
+      </div>
+    );
+  }
+
+  // 3. Network or Server Error state: renders "Can't reach the booth server, retrying..." with auto-retry
+  if (boothStatus === "error") {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-paper text-ink p-6 animate-fadeIn">
+        <Tile tone="surface" className="max-w-md w-full p-8 text-center space-y-4 shadow-xl border border-ink/10">
+          <div className="w-14 h-14 mx-auto rounded-full bg-danger/10 flex items-center justify-center text-danger">
+            <AlertTriangle className="w-7 h-7" />
+          </div>
+          <div>
+            <Label tone="danger" className="block mb-1">Connection Error</Label>
+            <h2 className="font-display text-3xl uppercase tracking-tight text-ink">
+              Booth Server Offline
+            </h2>
+          </div>
+          <p className="text-sm text-muted font-sans">
+            {statusError || "Can't reach the booth server, retrying..."}
+          </p>
+          <div className="pt-2 flex flex-col items-center gap-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              <span>Retrying every 3 seconds...</span>
+            </div>
+            <div className="flex gap-2">
+              <Pill
+                variant="primary"
+                size="md"
+                onClick={() => fetchCurrentBooth(true)}
+                className="uppercase tracking-wider font-mono text-xs min-h-[44px]"
+              >
+                Retry Now
+              </Pill>
+              <Pill
+                variant="secondary"
+                size="md"
+                onClick={() => router.push("/")}
+                className="uppercase tracking-wider font-mono text-xs min-h-[44px]"
+              >
+                Back to Home
+              </Pill>
+            </div>
           </div>
         </Tile>
       </div>
@@ -1075,15 +1209,14 @@ export default function ShootConsole() {
               </div>
 
               <div
-                className={`grid gap-2.5 sm:gap-3 w-full ${
-                  totalShots === 1
-                    ? "grid-cols-1 max-w-sm mx-auto"
-                    : totalShots === 2
+                className={`grid gap-2.5 sm:gap-3 w-full ${totalShots === 1
+                  ? "grid-cols-1 max-w-sm mx-auto"
+                  : totalShots === 2
                     ? "grid-cols-2"
                     : totalShots === 3
-                    ? "grid-cols-3"
-                    : "grid-cols-2 sm:grid-cols-4"
-                }`}
+                      ? "grid-cols-3"
+                      : "grid-cols-2 sm:grid-cols-4"
+                  }`}
               >
                 {Array.from({ length: totalShots }).map((_, slotIdx) => {
                   const poseId = selectedPoses[slotIdx];
@@ -1098,22 +1231,20 @@ export default function ShootConsole() {
                       type="button"
                       onClick={() => setActiveSlotIndex(slotIdx)}
                       data-selected={isActive ? "true" : undefined}
-                      className={`relative flex min-h-[58px] sm:min-h-[64px] items-center gap-2.5 p-2.5 sm:p-3 rounded-tile text-left overflow-hidden ${
-                        isActive
-                          ? "is-selected bg-ink text-paper ring-2 ring-accent"
-                          : isFilled
+                      className={`relative flex min-h-[58px] sm:min-h-[64px] items-center gap-2.5 p-2.5 sm:p-3 rounded-tile text-left overflow-hidden ${isActive
+                        ? "is-selected bg-ink text-paper ring-2 ring-accent"
+                        : isFilled
                           ? "interactive-tile bg-surface text-ink border border-ink/10"
                           : "interactive-tile border-2 border-dashed border-ink/20 bg-paper/50 text-muted"
-                      }`}
+                        }`}
                     >
                       <div
-                        className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full ${
-                          isActive
-                            ? "bg-paper/15 text-accent"
-                            : isFilled
+                        className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full ${isActive
+                          ? "bg-paper/15 text-accent"
+                          : isFilled
                             ? "bg-paper text-accent"
                             : "bg-ink/5 text-muted"
-                        }`}
+                          }`}
                       >
                         <IconComp className="h-4 w-4" />
                       </div>
@@ -1121,9 +1252,8 @@ export default function ShootConsole() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
                           <span
-                            className={`font-mono text-[9px] uppercase tracking-wider ${
-                              isActive ? "text-accent font-bold" : "text-muted"
-                            }`}
+                            className={`font-mono text-[9px] uppercase tracking-wider ${isActive ? "text-accent font-bold" : "text-muted"
+                              }`}
                           >
                             SHOT {slotIdx + 1}
                           </span>
@@ -1157,11 +1287,10 @@ export default function ShootConsole() {
                       type="button"
                       onClick={() => handleSelectPoseForActiveSlot(pose.id)}
                       data-selected={isCurrentSlotPose ? "true" : undefined}
-                      className={`group relative flex flex-col items-center justify-between p-2.5 sm:p-3 text-center rounded-tile min-h-[clamp(85px,13vh,120px)] ${
-                        isCurrentSlotPose
-                          ? "is-selected bg-surface ring-2 ring-accent text-ink cursor-default"
-                          : "interactive-tile bg-surface text-ink border border-transparent"
-                      }`}
+                      className={`group relative flex flex-col items-center justify-between p-2.5 sm:p-3 text-center rounded-tile min-h-[clamp(85px,13vh,120px)] ${isCurrentSlotPose
+                        ? "is-selected bg-surface ring-2 ring-accent text-ink cursor-default"
+                        : "interactive-tile bg-surface text-ink border border-transparent"
+                        }`}
                     >
                       <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-paper text-accent mb-1 tile-icon-badge">
                         <IconComponent className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -1192,11 +1321,10 @@ export default function ShootConsole() {
                       type="button"
                       onClick={() => setCaptureType(type)}
                       data-selected={isActive ? "true" : undefined}
-                      className={`min-h-[44px] px-5 sm:px-7 rounded-full text-xs font-mono font-medium uppercase tracking-wider ${
-                        isActive
-                          ? "is-selected bg-ink text-paper"
-                          : "interactive-secondary text-muted hover:text-ink bg-transparent border border-transparent"
-                      }`}
+                      className={`min-h-[44px] px-5 sm:px-7 rounded-full text-xs font-mono font-medium uppercase tracking-wider ${isActive
+                        ? "is-selected bg-ink text-paper"
+                        : "interactive-secondary text-muted hover:text-ink bg-transparent border border-transparent"
+                        }`}
                     >
                       {type}
                     </button>
@@ -1450,11 +1578,10 @@ export default function ShootConsole() {
                     type="button"
                     onClick={() => setReviewIndex(idx)}
                     data-selected={isActive ? "true" : undefined}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono font-bold min-h-[36px] ${
-                      isActive
-                        ? "is-selected bg-ink text-paper ring-2 ring-accent"
-                        : "interactive-secondary bg-surface text-ink border border-transparent"
-                    }`}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-mono font-bold min-h-[36px] ${isActive
+                      ? "is-selected bg-ink text-paper ring-2 ring-accent"
+                      : "interactive-secondary bg-surface text-ink border border-transparent"
+                      }`}
                   >
                     <span>SHOT {idx + 1}</span>
                     {shotPose && (
@@ -1463,9 +1590,8 @@ export default function ShootConsole() {
                       </span>
                     )}
                     <span
-                      className={`h-2 w-2 rounded-full ${
-                        isActive ? "bg-accent" : hasShot ? "bg-ink/40" : "bg-ink/10"
-                      }`}
+                      className={`h-2 w-2 rounded-full ${isActive ? "bg-accent" : hasShot ? "bg-ink/40" : "bg-ink/10"
+                        }`}
                     />
                   </button>
                 );
@@ -1889,115 +2015,121 @@ export default function ShootConsole() {
       </footer>
 
       {/* QR MODAL */}
-      {showQrTile && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm animate-fadeIn"
-          onClick={() => setShowQrTile(false)}
+      <Modal
+        isOpen={showQrTile}
+        onClose={() => setShowQrTile(false)}
+        ariaLabel="Scan on your phone"
+        zIndex="z-50"
+      >
+        <Tile
+          tone="paper"
+          className="w-full max-w-xs p-6 text-center shadow-2xl border border-ink/20"
+          onClick={(e) => e.stopPropagation()}
         >
-          <Tile
-            tone="paper"
-            className="w-full max-w-xs p-6 text-center shadow-2xl border border-ink/20"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-2">
-              <Label tone="accent">Scan On Your Phone</Label>
-              <button
-                type="button"
-                onClick={() => setShowQrTile(false)}
-                className="text-muted hover:text-ink min-h-[32px] min-w-[32px] flex items-center justify-center"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="bg-white p-3 rounded-xl shadow-inner mb-2 border border-ink/10 flex justify-center">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt="Gallery QR code"
-                  className="h-44 w-44 object-contain"
-                />
-              ) : (
-                <div className="h-44 w-44 flex items-center justify-center font-mono text-xs text-muted">
-                  Generating QR...
-                </div>
-              )}
-            </div>
-            <div className="font-mono text-[10px] text-muted break-all">
-              {`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")}/gallery?token=${guestToken}`}
-            </div>
-          </Tile>
-        </div>
-      )}
+          <div className="flex items-center justify-between pb-2">
+            <Label tone="accent">Scan On Your Phone</Label>
+            <button
+              type="button"
+              onClick={() => setShowQrTile(false)}
+              className="text-muted hover:text-ink min-h-[32px] min-w-[32px] flex items-center justify-center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="bg-white p-3 rounded-xl shadow-inner mb-2 border border-ink/10 flex justify-center">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt="Gallery QR code"
+                className="h-44 w-44 object-contain"
+              />
+            ) : (
+              <div className="h-44 w-44 flex items-center justify-center font-mono text-xs text-muted">
+                Generating QR...
+              </div>
+            )}
+          </div>
+          <div className="font-mono text-[10px] text-muted break-all">
+            {`${process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")}/gallery?token=${guestToken}`}
+          </div>
+        </Tile>
+      </Modal>
 
       {/* CONFIRM RETAKE ALL MODAL */}
-      {showRetakeAllPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm animate-fadeIn">
-          <Tile tone="paper" className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-ink">
-              <RotateCcw className="h-6 w-6 text-accent" />
-            </div>
-            <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
-              Retake All Shots?
-            </h3>
-            <p className="text-xs text-muted mb-6 font-sans">
-              Are you sure? This will start the photo sequence over and use 1 retake for each of your shots.
-            </p>
-            <div className="flex flex-col gap-2">
-              <Pill
-                variant="accent"
-                size="md"
-                onClick={handleConfirmRetakeAll}
-                className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
-              >
-                Yes, Retake All
-              </Pill>
-              <Pill
-                variant="secondary"
-                size="md"
-                onClick={() => setShowRetakeAllPrompt(false)}
-                className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
-              >
-                Cancel
-              </Pill>
-            </div>
-          </Tile>
-        </div>
-      )}
+      <Modal
+        isOpen={showRetakeAllPrompt}
+        onClose={() => setShowRetakeAllPrompt(false)}
+        ariaLabel="Retake all shots"
+        zIndex="z-50"
+      >
+        <Tile tone="paper" className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-ink">
+            <RotateCcw className="h-6 w-6 text-accent" />
+          </div>
+          <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
+            Retake All Shots?
+          </h3>
+          <p className="text-xs text-muted mb-6 font-sans">
+            Are you sure? This will start the photo sequence over and use 1 retake for each of your shots.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Pill
+              variant="accent"
+              size="md"
+              onClick={handleConfirmRetakeAll}
+              className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
+            >
+              Yes, Retake All
+            </Pill>
+            <Pill
+              variant="secondary"
+              size="md"
+              onClick={() => setShowRetakeAllPrompt(false)}
+              className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
+            >
+              Cancel
+            </Pill>
+          </div>
+        </Tile>
+      </Modal>
 
       {/* CANCEL CONFIRMATION MODAL */}
-      {showCancelPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm animate-fadeIn">
-          <Tile tone="paper" className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-ink">
-              <AlertTriangle className="h-6 w-6 text-accent" />
-            </div>
-            <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
-              Cancel Shoot?
-            </h3>
-            <p className="text-xs text-muted mb-6 font-sans">
-              Are you sure? You will return to the home attract screen. Your pose slots and queue spot will reset for when you are ready.
-            </p>
-            <div className="flex flex-col gap-2">
-              <Pill
-                variant="danger"
-                size="md"
-                onClick={handleConfirmCancel}
-                className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
-              >
-                Yes, Return to Home
-              </Pill>
-              <Pill
-                variant="secondary"
-                size="md"
-                onClick={() => setShowCancelPrompt(false)}
-                className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
-              >
-                Keep Shooting
-              </Pill>
-            </div>
-          </Tile>
-        </div>
-      )}
+      <Modal
+        isOpen={showCancelPrompt}
+        onClose={() => setShowCancelPrompt(false)}
+        ariaLabel="Cancel shoot"
+        zIndex="z-50"
+      >
+        <Tile tone="paper" className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-ink">
+            <AlertTriangle className="h-6 w-6 text-accent" />
+          </div>
+          <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
+            Cancel Shoot?
+          </h3>
+          <p className="text-xs text-muted mb-6 font-sans">
+            Are you sure? You will return to the home attract screen. Your pose slots and queue spot will reset for when you are ready.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Pill
+              variant="danger"
+              size="md"
+              onClick={handleConfirmCancel}
+              className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
+            >
+              Yes, Return to Home
+            </Pill>
+            <Pill
+              variant="secondary"
+              size="md"
+              onClick={() => setShowCancelPrompt(false)}
+              className="w-full uppercase font-mono tracking-wider text-xs min-h-[44px]"
+            >
+              Keep Shooting
+            </Pill>
+          </div>
+        </Tile>
+      </Modal>
     </div>
   );
 }

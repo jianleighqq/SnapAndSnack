@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { AlertTriangle, AlertCircle, CheckCircle2, X } from "lucide-react";
 import { Pill } from "@/components/ui/Pill";
-import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
+import { Modal } from "@/components/ui/Modal";
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -31,29 +31,16 @@ export default function ConfirmModal({
   onConfirm,
   isLoading = false,
 }: ConfirmModalProps) {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen && !isLoading) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, isLoading, onClose]);
-
-  if (!isOpen) return null;
-
   const pillVariant = variant === "danger" ? "danger" : variant === "warning" ? "accent" : "primary";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/30 backdrop-blur-sm overflow-y-auto"
-      onClick={() => {
+    <Modal
+      isOpen={isOpen}
+      onClose={() => {
         if (!isLoading) onClose();
       }}
+      ariaLabelledBy="confirm-modal-title"
+      zIndex="z-50"
     >
       <div
         className="w-full max-w-md rounded-tile bg-paper p-4 sm:p-6 text-ink relative shadow-xl max-h-[90vh] overflow-y-auto"
@@ -113,6 +100,6 @@ export default function ConfirmModal({
           </Pill>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

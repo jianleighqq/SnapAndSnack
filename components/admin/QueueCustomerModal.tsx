@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
 import { QueueStatusPill, queueNumberClasses } from "@/components/ui/QueueStatus";
 import { cn } from "@/components/ui/cn";
+import { Modal } from "@/components/ui/Modal";
 
 interface QueueCustomerModalProps {
   entry: QueueEntryWithGuest | null;
@@ -142,11 +143,11 @@ export default function QueueCustomerModal({
 
   return (
     <>
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto"
-        onClick={onClose}
+      <Modal
+        isOpen={Boolean(entry)}
+        onClose={onClose}
+        ariaLabel={`Manage guest #${entry.queue_number}`}
+        zIndex="z-50"
       >
         <div
           className="relative w-full max-w-lg rounded-tile bg-paper p-4 sm:p-6 text-ink shadow-xl max-h-[90vh] overflow-y-auto"
@@ -351,79 +352,77 @@ export default function QueueCustomerModal({
             </div>
           )}
         </div>
-      </div>
+      </Modal>
 
       {/* QR Code Modal Overlay */}
-      {showQrModal && (
+      <Modal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        ariaLabel={`Guest ticket QR code for #${entry.queue_number}`}
+        zIndex="z-[60]"
+      >
         <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/40 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto"
-          onClick={() => setShowQrModal(false)}
+          className="relative w-full max-w-xs rounded-tile bg-paper p-5 sm:p-6 text-ink shadow-2xl text-center max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
         >
-          <div
-            className="relative w-full max-w-xs rounded-tile bg-paper p-5 sm:p-6 text-ink shadow-2xl text-center max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+          <Pill
+            variant="secondary"
+            size="icon"
+            onClick={() => setShowQrModal(false)}
+            aria-label="Close QR code"
+            className="absolute right-4 top-4"
           >
-            <Pill
-              variant="secondary"
-              size="icon"
-              onClick={() => setShowQrModal(false)}
-              aria-label="Close QR code"
-              className="absolute right-4 top-4"
-            >
-              <X className="h-4 w-4" />
-            </Pill>
+            <X className="h-4 w-4" />
+          </Pill>
 
-            <div className="mb-2">
-              <Label className="block mb-1">Guest Ticket QR</Label>
-              <h3 className="font-display text-xl uppercase tracking-tight text-ink">
-                #{entry.queue_number} {entry.guest.full_name}
-              </h3>
-            </div>
-
-            <div className="my-4 flex items-center justify-center rounded-2xl bg-white p-4 shadow-sm border border-ink/10 aspect-square max-w-[220px] mx-auto">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code for ticket #${entry.queue_number}`}
-                  className="h-full w-full object-contain"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center text-muted">
-                  <QrCode className="h-8 w-8 animate-pulse mb-2 text-muted" />
-                  <span className="font-mono text-xs">Generating QR...</span>
-                </div>
-              )}
-            </div>
-
-            <p className="font-mono text-xs text-muted mb-4 leading-relaxed">
-              Scan with phone camera to open personal queue ticket.
-            </p>
-
-            <Pill
-              variant={isCopied ? "secondary" : "primary"}
-              onClick={handleCopyTicketLink}
-              className={cn(
-                "w-full justify-center gap-1.5",
-                isCopied && "border-ok/40 bg-ok/10 text-ok"
-              )}
-            >
-              {isCopied ? (
-                <>
-                  <Check className="h-4 w-4 text-ok" />
-                  <span>Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-4 w-4" />
-                  <span>Copy Ticket Link</span>
-                </>
-              )}
-            </Pill>
+          <div className="mb-2">
+            <Label className="block mb-1">Guest Ticket QR</Label>
+            <h3 className="font-display text-xl uppercase tracking-tight text-ink">
+              #{entry.queue_number} {entry.guest.full_name}
+            </h3>
           </div>
+
+          <div className="my-4 flex items-center justify-center rounded-2xl bg-white p-4 shadow-sm border border-ink/10 aspect-square max-w-[220px] mx-auto">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={`QR code for ticket #${entry.queue_number}`}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-muted">
+                <QrCode className="h-8 w-8 animate-pulse mb-2 text-muted" />
+                <span className="font-mono text-xs">Generating QR...</span>
+              </div>
+            )}
+          </div>
+
+          <p className="font-mono text-xs text-muted mb-4 leading-relaxed">
+            Scan with phone camera to open personal queue ticket.
+          </p>
+
+          <Pill
+            variant={isCopied ? "secondary" : "primary"}
+            onClick={handleCopyTicketLink}
+            className={cn(
+              "w-full justify-center gap-1.5",
+              isCopied && "border-ok/40 bg-ok/10 text-ok"
+            )}
+          >
+            {isCopied ? (
+              <>
+                <Check className="h-4 w-4 text-ok" />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4" />
+                <span>Copy Ticket Link</span>
+              </>
+            )}
+          </Pill>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

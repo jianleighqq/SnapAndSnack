@@ -6,6 +6,7 @@ import { Lock, X, AlertCircle } from "lucide-react";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
+import { Modal } from "@/components/ui/Modal";
 
 interface PinModalProps {
   isOpen: boolean;
@@ -86,15 +87,11 @@ export default function PinModal({ isOpen, onClose, onSuccess }: PinModalProps) 
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pin-modal-title"
-      className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-ink/30 p-3 sm:p-4 backdrop-blur-sm overflow-y-auto"
-      onClick={(e) => {
-        // Prevent background clicks inside the modal from bubbling to the screen
-        e.stopPropagation();
-      }}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      ariaLabelledBy="pin-modal-title"
+      zIndex="z-50"
     >
       <div
         className="relative w-full max-w-md rounded-tile bg-paper p-5 sm:p-8 text-ink max-h-[90vh] overflow-y-auto"
@@ -162,6 +159,6 @@ export default function PinModal({ isOpen, onClose, onSuccess }: PinModalProps) 
           </div>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

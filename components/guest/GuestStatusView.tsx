@@ -20,6 +20,7 @@ import { Pill, PillLink } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
 import { cn } from "@/components/ui/cn";
+import { Modal } from "@/components/ui/Modal";
 
 export interface GuestStatusData {
   first_name: string;
@@ -397,59 +398,57 @@ export default function GuestStatusView() {
       </footer>
 
       {/* Confirmation Modal */}
-      {showCancelModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/50 backdrop-blur-sm animate-fadeIn"
-          onClick={() => setShowCancelModal(false)}
+      <Modal
+        isOpen={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        ariaLabel="Cancel booking"
+        zIndex="z-50"
+      >
+        <Tile
+          tone="paper"
+          className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20"
+          onClick={(e) => e.stopPropagation()}
         >
-          <Tile
-            tone="paper"
-            className="w-full max-w-sm p-6 text-center shadow-2xl border border-ink/20"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
-              <AlertTriangle className="h-6 w-6" />
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+
+          <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
+            Cancel Booking?
+          </h3>
+          <p className="text-xs text-muted mb-4 font-sans">
+            Are you sure you want to cancel your queue spot #{queue_number}? This cannot be undone.
+          </p>
+
+          {cancelError && (
+            <div className="p-3 mb-4 rounded-xl bg-danger/10 text-danger text-xs text-left font-medium">
+              {cancelError}
             </div>
+          )}
 
-            <h3 className="font-display text-2xl uppercase tracking-tight text-ink mb-1">
-              Cancel Booking?
-            </h3>
-            <p className="text-xs text-muted mb-4 font-sans">
-              Are you sure you want to cancel your queue spot #{queue_number}? This cannot be undone.
-            </p>
+          <div className="space-y-2">
+            <Pill
+              variant="danger"
+              size="md"
+              disabled={isCancelling}
+              onClick={handleConfirmCancel}
+              className="w-full min-h-[44px] uppercase font-mono text-xs tracking-wider"
+            >
+              {isCancelling ? "Cancelling..." : "Yes, Cancel Booking"}
+            </Pill>
 
-            {cancelError && (
-              <div className="p-3 mb-4 rounded-xl bg-danger/10 text-danger text-xs text-left font-medium">
-                {cancelError}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Pill
-                variant="danger"
-                size="md"
-                disabled={isCancelling}
-                onClick={handleConfirmCancel}
-                className="w-full min-h-[44px] uppercase font-mono text-xs tracking-wider"
-              >
-                {isCancelling ? "Cancelling..." : "Yes, Cancel Booking"}
-              </Pill>
-
-              <Pill
-                variant="secondary"
-                size="md"
-                disabled={isCancelling}
-                onClick={() => setShowCancelModal(false)}
-                className="w-full min-h-[44px] uppercase font-mono text-xs tracking-wider"
-              >
-                Keep My Spot
-              </Pill>
-            </div>
-          </Tile>
-        </div>
-      )}
+            <Pill
+              variant="secondary"
+              size="md"
+              disabled={isCancelling}
+              onClick={() => setShowCancelModal(false)}
+              className="w-full min-h-[44px] uppercase font-mono text-xs tracking-wider"
+            >
+              Keep My Spot
+            </Pill>
+          </div>
+        </Tile>
+      </Modal>
     </div>
   );
 }
