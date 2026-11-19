@@ -35,7 +35,6 @@ import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
 import QRCode from "qrcode";
 
 export type ShootStep = "choose" | "countdown" | "preview" | "output";
-export type CaptureType = "Photo" | "GIF" | "Video";
 export type PreviewMode = "single" | "summary";
 export type BoothStatus = "loading" | "ready" | "no_guest" | "error";
 
@@ -80,7 +79,6 @@ export default function ShootConsole() {
 
   const [selectedPoses, setSelectedPoses] = useState<(string | null)[]>([null, null, null]);
   const [activeSlotIndex, setActiveSlotIndex] = useState<number>(0);
-  const [captureType, setCaptureType] = useState<CaptureType>("Photo");
 
   // Step 2: Multi-shot & Countdown
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
@@ -223,7 +221,7 @@ export default function ShootConsole() {
         const sessionRes = await fetch("/api/booth/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ captureType: "Photo" }),
+          body: JSON.stringify({ captureType: "PHOTO" }),
         });
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
@@ -352,7 +350,7 @@ export default function ShootConsole() {
       const sessionRes = await fetch("/api/booth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ captureType: "Photo" }),
+        body: JSON.stringify({ captureType: "PHOTO" }),
       });
       if (sessionRes.ok) {
         const sData = await sessionRes.json();
@@ -613,7 +611,7 @@ export default function ShootConsole() {
     try {
       const poseOption = getPoseById(poseId);
       const result = await hardware.capture({
-        type: captureType,
+        type: "PHOTO",
         pose: poseOption.name,
       });
 
@@ -1158,7 +1156,7 @@ export default function ShootConsole() {
       <main className="relative z-10 flex flex-1 flex-col justify-center overflow-y-auto no-scrollbar py-2 sm:py-3">
         {/* STEP 1: CHOOSE PER-SHOT POSES */}
         {step === "choose" && (
-          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col justify-between space-y-3 animate-fadeIn">
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col justify-center space-y-3 sm:space-y-4 animate-fadeIn">
             {/* Header / Subtitle */}
             <div className="text-center space-y-1">
               <Label tone="accent">Step 01 · Plan Your Sequence</Label>
@@ -1309,32 +1307,8 @@ export default function ShootConsole() {
               </div>
             </div>
 
-            {/* Capture Type Pill Toggles */}
-            <div className="flex flex-col items-center justify-center gap-1.5 pt-1">
-              <Label>Capture Type</Label>
-              <div className="inline-flex rounded-full bg-surface p-1">
-                {(["Photo", "GIF", "Video"] as CaptureType[]).map((type) => {
-                  const isActive = captureType === type;
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setCaptureType(type)}
-                      data-selected={isActive ? "true" : undefined}
-                      className={`min-h-[44px] px-5 sm:px-7 rounded-full text-xs font-mono font-medium uppercase tracking-wider ${isActive
-                        ? "is-selected bg-ink text-paper"
-                        : "interactive-secondary text-muted hover:text-ink bg-transparent border border-transparent"
-                        }`}
-                    >
-                      {type}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Start Countdown Button & Validation Label */}
-            <div className="flex flex-col items-center justify-center gap-1.5 pt-1">
+            <div className="flex flex-col items-center justify-center gap-1.5 pt-1 sm:pt-2">
               {!allPosesSelected && (
                 <Label tone="accent" className="font-bold text-[10px] tracking-[0.2em]">
                   PICK A POSE FOR EVERY SHOT
@@ -1398,10 +1372,6 @@ export default function ShootConsole() {
                     ? `RETAKING SHOT ${retakeTargetIndex + 1} OF ${totalShots}`
                     : `SHOT ${currentShotIndex + 1} OF ${totalShots}`}
                 </Label>
-              </div>
-
-              <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-10">
-                <Label className="text-paper/80">MODE: {captureType.toUpperCase()}</Label>
               </div>
 
               {/* PHASE 1: 3-SECOND POSE INTRO SCREEN BEFORE COUNTDOWN */}

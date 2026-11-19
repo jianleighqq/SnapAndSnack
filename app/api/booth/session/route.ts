@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       );
     }
 
-    let captureType = "Photo";
+    let captureType = "PHOTO";
     try {
       const body = await request.json();
       if (body && typeof body.captureType === "string") {

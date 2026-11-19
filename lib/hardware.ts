@@ -34,7 +34,7 @@ export interface CloudStatus {
 }
 
 export interface CaptureOptions {
-  type?: "Photo" | "GIF" | "Video";
+  type?: "PHOTO" | "Photo" | "GIF" | "Video";
   pose?: string;
 }
 

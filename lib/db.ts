@@ -901,7 +901,7 @@ class SupabaseDataStore implements IDataStore {
 
   async getOrCreateShootSession(
     queueId: string,
-    captureType: string = "Photo"
+    captureType: string = "PHOTO"
   ): Promise<{
     id: string;
     queue_id: string;
