@@ -53,6 +53,7 @@ export default function GuestGalleryView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -101,11 +102,54 @@ export default function GuestGalleryView() {
     };
   }, [token]);
 
-  // Robust blob-based file download
-  const handleDownload = async (url: string, filename: string, id: string) => {
+  // Robust binary file download with fresh signed URL retrieval & content-type verification
+  const handleDownload = async (
+    assetId: string,
+    initialUrl: string | null,
+    filename: string
+  ) => {
     try {
-      setDownloadingId(id);
-      const res = await fetch(url);
+      setDownloadingId(assetId);
+      setDownloadError(null);
+
+      // 1. Generate fresh signed URL through the API on each click rather than reusing stale one
+      let downloadUrl = initialUrl;
+      try {
+        const freshRes = await fetch(
+          `/api/gallery?token=${encodeURIComponent(token.trim())}&assetId=${encodeURIComponent(assetId)}`,
+          { cache: "no-store" }
+        );
+        if (freshRes.ok) {
+          const freshJson = await freshRes.json();
+          if (freshJson?.signedUrl) {
+            downloadUrl = freshJson.signedUrl;
+          }
+        }
+      } catch (freshErr) {
+        console.warn("[Gallery] Could not refresh signed URL, attempting with existing URL:", freshErr);
+      }
+
+      if (!downloadUrl) {
+        setDownloadError("Download failed, please reload and try again");
+        return;
+      }
+
+      // 2. Fetch signed URL as binary
+      const res = await fetch(downloadUrl);
+
+      // 3. Verify response is OK and content-type starts with "image/"
+      if (!res.ok) {
+        setDownloadError("Download failed, please reload and try again");
+        return;
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().startsWith("image/")) {
+        setDownloadError("Download failed, please reload and try again");
+        return;
+      }
+
+      // 4. Trigger download with URL.createObjectURL(blob) and <a download="...">
       const blob = await res.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -116,10 +160,10 @@ export default function GuestGalleryView() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     } catch (e) {
-      // Fallback direct window open
-      window.open(url, "_blank");
+      console.error("[Gallery] Download error:", e);
+      setDownloadError("Download failed, please reload and try again");
     } finally {
-      setTimeout(() => setDownloadingId(null), 1000);
+      setTimeout(() => setDownloadingId(null), 800);
     }
   };
 
@@ -194,6 +238,23 @@ export default function GuestGalleryView() {
 
       {/* Main Content */}
       <main className="flex-1 py-4 space-y-6">
+        {/* Download Error Banner */}
+        {downloadError && (
+          <div className="w-full flex items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger font-sans animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <XCircle className="h-4 w-4 shrink-0 text-danger" />
+              <span>{downloadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDownloadError(null)}
+              className="text-danger hover:underline font-mono text-[10px] uppercase tracking-wider shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Empty State: No Photos Yet */}
         {!hasPhotos && (
           <Tile tone="surface" className="p-8 text-center rounded-tile border border-ink/5">
@@ -240,9 +301,9 @@ export default function GuestGalleryView() {
                   disabled={downloadingId === strip.id}
                   onClick={() =>
                     handleDownload(
-                      strip.signed_url!,
-                      `snap-and-snack-${queue_number || "guest"}-strip.jpg`,
-                      strip.id
+                      strip.id,
+                      strip.signed_url,
+                      `snap-and-snack-${queue_number || "guest"}-strip.jpg`
                     )
                   }
                   className="w-full min-h-[46px] uppercase font-mono text-xs tracking-wider gap-2"
@@ -288,9 +349,9 @@ export default function GuestGalleryView() {
                   disabled={downloadingId === gif.id}
                   onClick={() =>
                     handleDownload(
-                      gif.signed_url!,
-                      `snap-and-snack-${queue_number || "guest"}.gif`,
-                      gif.id
+                      gif.id,
+                      gif.signed_url,
+                      `snap-and-snack-${queue_number || "guest"}.gif`
                     )
                   }
                   className="w-full min-h-[46px] uppercase font-mono text-xs tracking-wider gap-2"
@@ -356,7 +417,7 @@ export default function GuestGalleryView() {
                       variant="secondary"
                       size="md"
                       disabled={isDownloading}
-                      onClick={() => handleDownload(photo.signed_url!, filename, photo.id)}
+                      onClick={() => handleDownload(photo.id, photo.signed_url, filename)}
                       className="w-full min-h-[42px] uppercase font-mono text-xs tracking-wider gap-1.5"
                     >
                       {isDownloading ? (

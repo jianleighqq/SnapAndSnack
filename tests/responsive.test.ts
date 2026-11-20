@@ -43,6 +43,25 @@ test("OperatorNav ensures one-line logo and mobile 44px tap targets", () => {
 
   // Touch target >= 44px
   assert.ok(content.includes("min-h-[44px]"), "Interactive items must have min 44px tap targets");
+
+  // Operator navigation items: Shoot Console removed
+  assert.ok(!content.includes("/admin/shoot"), "OperatorNav must not include /admin/shoot");
+  assert.ok(!content.includes("Shoot Console"), "OperatorNav must not include Shoot Console");
+  assert.ok(content.includes("/admin/queue"), "OperatorNav must include Queue Board");
+  assert.ok(content.includes("/admin/setup"), "OperatorNav must include Event Setup");
+  assert.ok(content.includes("/admin/gallery"), "OperatorNav must include Gallery");
+});
+
+test("/admin/shoot route configures permanent redirect to /booth/shoot", () => {
+  const shootPagePath = path.resolve(process.cwd(), "app/(admin)/admin/shoot/page.tsx");
+  const shootContent = fs.readFileSync(shootPagePath, "utf-8");
+  assert.ok(shootContent.includes('permanentRedirect("/booth/shoot")'), "Page should permanently redirect to /booth/shoot");
+
+  const configPath = path.resolve(process.cwd(), "next.config.mjs");
+  const configContent = fs.readFileSync(configPath, "utf-8");
+  assert.ok(configContent.includes('source: "/admin/shoot"'), "next.config.mjs should match /admin/shoot redirect source");
+  assert.ok(configContent.includes('destination: "/booth/shoot"'), "next.config.mjs should point redirect destination to /booth/shoot");
+  assert.ok(configContent.includes("permanent: true"), "Redirect should be permanent (308)");
 });
 
 test("QueueBoardView collapses queue list into cards on mobile", () => {

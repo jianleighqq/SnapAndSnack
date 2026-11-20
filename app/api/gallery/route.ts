@@ -138,6 +138,66 @@ export async function GET(request: Request) {
       });
     }
 
+    // --- FRESH SIGNED URL FOR SPECIFIC ASSET DOWNLOAD ---
+    const assetId = searchParams.get("assetId");
+    if (assetId) {
+      if (!token || !token.trim()) {
+        return NextResponse.json(
+          { error: "Valid gallery token is required" },
+          { status: 404, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
+      const cleanToken = token.trim();
+      const { data: guest, error: gErr } = await supabaseServer
+        .from("guests")
+        .select("id")
+        .eq("guest_token", cleanToken)
+        .maybeSingle();
+
+      if (gErr || !guest) {
+        return NextResponse.json(
+          { error: "Gallery not found" },
+          { status: 404, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
+      const { data: asset, error: aErr } = await supabaseServer
+        .from("media_assets")
+        .select("id, session_id, storage_path, media_type, shot_number")
+        .eq("id", assetId)
+        .maybeSingle();
+
+      if (aErr || !asset) {
+        return NextResponse.json(
+          { error: "Media asset not found" },
+          { status: 404, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
+      // Generate a fresh signed URL (valid for 5 minutes)
+      const { data: signed, error: signErr } = await supabaseServer.storage
+        .from("photos")
+        .createSignedUrl(asset.storage_path, 300);
+
+      if (signErr || !signed?.signedUrl) {
+        return NextResponse.json(
+          { error: "Failed to generate fresh signed download URL" },
+          { status: 500, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: true,
+          signedUrl: signed.signedUrl,
+          mediaType: asset.media_type,
+          shotNumber: asset.shot_number,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     // --- GUEST VIEW: Specific guest gallery by token ---
     if (!token || !token.trim()) {
       return NextResponse.json(

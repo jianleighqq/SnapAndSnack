@@ -31,6 +31,7 @@ import { hardware } from "@/lib/hardware";
 import { composePrintLayout } from "@/lib/layout";
 import { renderTemplateStrip, composeDualPrintSheet } from "@/lib/template-builder";
 import { createAnimatedGif } from "@/lib/gif";
+import { toBinaryImageBlob } from "@/lib/image-convert";
 import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
 import QRCode from "qrcode";
 
@@ -365,7 +366,7 @@ export default function ShootConsole() {
     return null;
   };
 
-  // Upload individual photo to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
+  // Upload individual photo to Supabase storage 'photos' bucket & media_assets as real binary JPEG
   const uploadShotPhoto = async (
     shotIdx: number,
     shot: CapturedShot,
@@ -373,23 +374,28 @@ export default function ShootConsole() {
   ) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      const binaryBlob = await toBinaryImageBlob(shot.image, "PHOTO", 800, 600);
 
-      const res = await fetch("/api/booth/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: shot.image,
-          mediaType: "PHOTO",
-          shotNumber: shotIdx + 1,
-          retakeCount:
-            retakeCnt ??
+      const formData = new FormData();
+      formData.append("file", binaryBlob, `shot-${shotIdx + 1}.jpg`);
+      formData.append("mediaType", "PHOTO");
+      formData.append("shotNumber", String(shotIdx + 1));
+      formData.append(
+        "retakeCount",
+        String(
+          retakeCnt ??
             Math.max(
               0,
               maxRetakesAllowed - (retakesLeft[shotIdx] ?? maxRetakesAllowed)
-            ),
-          poseId: shot.poseId,
-          sessionId: resolvedSessionId,
-        }),
+            )
+        )
+      );
+      if (shot.poseId) formData.append("poseId", shot.poseId);
+      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
+
+      const res = await fetch("/api/booth/upload", {
+        method: "POST",
+        body: formData,
       });
 
       if (!res.ok) {
@@ -403,19 +409,20 @@ export default function ShootConsole() {
     }
   };
 
-  // Upload composed strip to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
+  // Upload composed strip to Supabase storage 'photos' bucket & media_assets as real binary JPEG
   const uploadComposedStrip = async (imageUrl: string) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      const binaryBlob = await toBinaryImageBlob(imageUrl, "STRIP", 1200, 1800);
+
+      const formData = new FormData();
+      formData.append("file", binaryBlob, "strip.jpg");
+      formData.append("mediaType", "STRIP");
+      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
 
       const res = await fetch("/api/booth/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: imageUrl,
-          mediaType: "STRIP",
-          sessionId: resolvedSessionId,
-        }),
+        body: formData,
       });
 
       if (res.ok) {
@@ -434,19 +441,20 @@ export default function ShootConsole() {
     }
   };
 
-  // Upload animated GIF to Supabase storage 'photos' bucket & media_assets via public scoped endpoint
+  // Upload animated GIF to Supabase storage 'photos' bucket & media_assets as real binary GIF
   const uploadGif = async (imageUrl: string) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      const binaryBlob = await toBinaryImageBlob(imageUrl, "GIF");
+
+      const formData = new FormData();
+      formData.append("file", binaryBlob, "animation.gif");
+      formData.append("mediaType", "GIF");
+      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
 
       const res = await fetch("/api/booth/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: imageUrl,
-          mediaType: "GIF",
-          sessionId: resolvedSessionId,
-        }),
+        body: formData,
       });
 
       if (!res.ok) {

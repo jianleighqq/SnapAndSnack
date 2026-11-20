@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, Settings, Camera, Image as ImageIcon, MonitorPlay, LogOut } from "lucide-react";
+import { Users, Settings, Image as ImageIcon, MonitorPlay, LogOut } from "lucide-react";
 import { Pill, PillLink } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { cn } from "@/components/ui/cn";
@@ -39,11 +39,6 @@ export default function OperatorNav() {
       name: "Event Setup",
       href: "/admin/setup",
       icon: Settings,
-    },
-    {
-      name: "Shoot Console",
-      href: "/admin/shoot",
-      icon: Camera,
     },
     {
       name: "Gallery",

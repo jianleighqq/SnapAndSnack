@@ -3,6 +3,7 @@ import { getCurrentBoothGuest } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
 import { db } from "@/lib/db";
+import { validateImageMagicBytes } from "@/lib/image-convert";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,14 +59,61 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json();
-    const { image, mediaType, shotNumber, retakeCount, poseId, sessionId } = body || {};
+    let buffer: Buffer;
+    let mimeType: string;
+    let mediaType: "PHOTO" | "STRIP" | "GIF";
+    let shotNumber: number | undefined;
+    let retakeCount: number | undefined;
+    let poseId: string | undefined;
+    let sessionId: string | null | undefined;
 
-    if (!image) {
-      return NextResponse.json(
-        { error: "Missing required image parameter" },
-        { status: 400, headers: { "Cache-Control": "no-store" } }
-      );
+    const contentTypeHeader = request.headers.get("content-type") || "";
+
+    if (contentTypeHeader.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const file = formData.get("file") as File | Blob | null;
+      if (!file) {
+        return NextResponse.json(
+          { error: "Missing required file parameter in form data" },
+          { status: 400, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      mediaType = String(formData.get("mediaType") || "").toUpperCase() as any;
+      sessionId = (formData.get("sessionId") as string) || undefined;
+      const shotNumStr = formData.get("shotNumber") as string | null;
+      if (shotNumStr) shotNumber = parseInt(shotNumStr, 10);
+      const retakeStr = formData.get("retakeCount") as string | null;
+      if (retakeStr) retakeCount = parseInt(retakeStr, 10);
+      poseId = (formData.get("poseId") as string) || undefined;
+
+      const arrayBuffer = await file.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      mimeType = file.type || (mediaType === "GIF" ? "image/gif" : "image/jpeg");
+    } else {
+      const body = await request.json();
+      const { image } = body || {};
+      mediaType = String(body?.mediaType || "").toUpperCase() as any;
+      sessionId = body?.sessionId;
+      shotNumber = body?.shotNumber;
+      retakeCount = body?.retakeCount;
+      poseId = body?.poseId;
+
+      if (!image) {
+        return NextResponse.json(
+          { error: "Missing required image parameter" },
+          { status: 400, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+
+      const parsed = parseDataUrl(image);
+      if (!parsed) {
+        return NextResponse.json(
+          { error: "Invalid image format: must be a valid image data URL" },
+          { status: 400, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      buffer = parsed.buffer;
+      mimeType = parsed.mimeType;
     }
 
     if (mediaType !== "PHOTO" && mediaType !== "STRIP" && mediaType !== "GIF") {
@@ -75,15 +123,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const parsed = parseDataUrl(image);
-    if (!parsed) {
-      return NextResponse.json(
-        { error: "Invalid image format: must be a valid image data URL" },
-        { status: 400, headers: { "Cache-Control": "no-store" } }
-      );
-    }
-
-    const { mimeType, buffer } = parsed;
     if (buffer.byteLength > MAX_BYTES) {
       return NextResponse.json(
         {
@@ -97,8 +136,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // Verify binary magic bytes (JPEG: FF D8 FF; GIF: 47 49 46 38)
+    if (!validateImageMagicBytes(buffer, mediaType)) {
+      const expected = mediaType === "GIF" ? "GIF8 (47 49 46 38)" : "JPEG (FF D8 FF)";
+      return NextResponse.json(
+        {
+          error: `Invalid binary image data: ${mediaType} must begin with magic bytes for ${expected}`,
+        },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     // Resolve or verify session ID for this in-progress guest
-    let targetSessionId = sessionId;
+    let targetSessionId: string | null | undefined = sessionId;
     if (!targetSessionId) {
       const { data: sRows } = await supabaseServer
         .from("shoot_sessions")
@@ -112,16 +162,13 @@ export async function POST(request: Request) {
 
     if (!targetSessionId) {
       // Ensure an active shoot session exists for this guest
-      const session = await db.getOrCreateShootSession(context.queueEntry.id, "Photo");
+      const session = await db.getOrCreateShootSession(context.queueEntry.id, "PHOTO");
       targetSessionId = session?.id || null;
     }
 
-    // Determine extension
-    let extension = "jpg";
-    if (mimeType.includes("png")) extension = "png";
-    else if (mimeType.includes("svg")) extension = "svg";
-    else if (mimeType.includes("webp")) extension = "webp";
-    else if (mimeType.includes("gif")) extension = "gif";
+    // Canonical extension & content type
+    const extension = mediaType === "GIF" ? "gif" : "jpg";
+    const storageContentType = mediaType === "GIF" ? "image/gif" : "image/jpeg";
 
     const timestamp = Date.now();
     const storagePath =
@@ -131,11 +178,11 @@ export async function POST(request: Request) {
         ? `${context.event.id}/${context.guest.id}/animation.gif`
         : `${context.event.id}/${context.guest.id}/strip-${timestamp}.${extension}`;
 
-    // Upload to Supabase Storage 'photos' bucket
+    // Upload real binary buffer to Supabase Storage 'photos' bucket
     const { error: uploadError } = await supabaseServer.storage
       .from("photos")
       .upload(storagePath, buffer, {
-        contentType: mimeType,
+        contentType: storageContentType,
         upsert: true,
       });
 

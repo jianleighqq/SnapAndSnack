@@ -11,8 +11,8 @@ Web-based photo booth and event queue management system. Guests register on thei
 - **Data Layer**: `/lib` abstracted data layer supporting interchangeable Mock data and Supabase (PostgreSQL + Realtime)
 - **Platform Targets**:
   - **Booth Screen**: Full-screen landscape attract display (`/`)
-  - **Booth Capture**: Placeholder flow (`/booth/shoot`)
-  - **Operator UI**: Laptop screens with persistent menu (`/admin/queue`, `/admin/setup`, `/admin/shoot`)
+  - **Booth Capture**: Live capture console (`/booth/shoot`)
+  - **Operator UI**: Laptop screens with persistent menu (`/admin/queue`, `/admin/setup`, `/admin/gallery`)
   - **Guest UI**: Mobile web (`/guest`, `/guest/[token]`)
   - **Public Gallery**: Responsive photo wall (`/gallery`)
 

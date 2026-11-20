@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { validateImageMagicBytes } from "@/lib/image-convert";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -117,6 +118,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Verify binary magic bytes (JPEG: FF D8 FF)
+    if (!validateImageMagicBytes(buffer, mediaType as any)) {
+      return NextResponse.json(
+        { error: `Invalid binary image data: ${mediaType} must begin with magic bytes for JPEG (FF D8 FF)` },
+        { status: 400 }
+      );
+    }
+
     // 3. Storage path: {event_id}/{guest_id}/shot-{shot_number}.jpg or {event_id}/{guest_id}/strip.jpg
     const storagePath =
       mediaType === "PHOTO"
@@ -127,7 +136,7 @@ export async function POST(request: Request) {
     const { error: uploadError } = await supabaseServer.storage
       .from("photos")
       .upload(storagePath, buffer, {
-        contentType: mimeType === "image/svg+xml" ? "image/svg+xml" : "image/jpeg",
+        contentType: "image/jpeg",
         upsert: true,
       });
 
