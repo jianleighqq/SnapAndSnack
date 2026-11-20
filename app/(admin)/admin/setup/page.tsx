@@ -1,10 +1,16 @@
 import React from "react";
+import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import EventSetupView from "@/components/admin/setup/EventSetupView";
 import { PageHeader } from "@/components/ui/PageHeader";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+export const metadata: Metadata = {
+  title: "Event Setup",
+  robots: { index: false, follow: false },
+};
 
 export default async function EventSetupPage() {
   const [events, activeEvent] = await Promise.all([

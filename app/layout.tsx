@@ -5,6 +5,7 @@ import "./globals.css";
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  themeColor: "#F3F1ED",
 };
 
 const anton = Anton({
@@ -27,8 +28,11 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Snap & Snack - Photobooth Queue & Event System",
-  description: "Web-based photo booth and event queue management system.",
+  title: {
+    default: "Snap & Snack - Photo Booth",
+    template: "Snap & Snack - %s",
+  },
+  description: "Photo booth queue and event management",
 };
 
 export default function RootLayout({
