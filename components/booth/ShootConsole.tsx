@@ -32,7 +32,7 @@ import { composePrintLayout } from "@/lib/layout";
 import { renderTemplateStrip, composeDualPrintSheet } from "@/lib/template-builder";
 import { createAnimatedGif } from "@/lib/gif";
 import { toBinaryImageBlob } from "@/lib/image-convert";
-import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
+import type { QueueEntryWithGuest, Event, PhotoTemplate, Pose } from "@/lib/types";
 import QRCode from "qrcode";
 
 export type ShootStep = "frame" | "choose" | "countdown" | "preview" | "output";
@@ -41,19 +41,15 @@ export type BoothStatus = "loading" | "ready" | "no_guest" | "error";
 
 export const POSE_PREVIEW_PAUSE_MS = 3000;
 
-export interface PoseOption {
-  id: string;
-  name: string;
-  subtitle: string;
-  icon: React.ElementType;
-}
-
-export const POSES: PoseOption[] = [
-  { id: "couple", name: "Classic couple", subtitle: "Close & timeless", icon: Heart },
-  { id: "group", name: "Group", subtitle: "Squad shoulder-to-shoulder", icon: Users },
-  { id: "peace", name: "Peace sign", subtitle: "Retro booth double V", icon: Hand },
-  { id: "funny", name: "Funny face", subtitle: "Wild expressions, zero filter", icon: Smile },
+export const DEFAULT_FALLBACK_POSES: Pose[] = [
+  { id: "00000000-0000-0000-0000-000000000001", name: "Classic couple", description: "Close & timeless", is_active: true, sort_order: 1 },
+  { id: "00000000-0000-0000-0000-000000000002", name: "Group", description: "Squad shoulder-to-shoulder", is_active: true, sort_order: 2 },
+  { id: "00000000-0000-0000-0000-000000000003", name: "Peace sign", description: "Retro booth double V", is_active: true, sort_order: 3 },
+  { id: "00000000-0000-0000-0000-000000000004", name: "Funny face", description: "Wild expressions, zero filter", is_active: true, sort_order: 4 },
 ];
+
+// Backwards-compatibility alias for tests
+export const POSES = DEFAULT_FALLBACK_POSES;
 
 export interface CapturedShot {
   image: string;
@@ -70,6 +66,9 @@ export default function ShootConsole() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const boothRequestIdRef = useRef<number>(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Dynamic active poses from database
+  const [availablePoses, setAvailablePoses] = useState<Pose[]>(DEFAULT_FALLBACK_POSES);
 
   // Step state
   const [step, setStep] = useState<ShootStep>("choose");
@@ -94,7 +93,7 @@ export default function ShootConsole() {
 
   // Countdown state: intro pose preview (3s) -> numerical 3-2-1
   const [countdownPhase, setCountdownPhase] = useState<"intro" | "counting">("intro");
-  const [currentPoseInfo, setCurrentPoseInfo] = useState<PoseOption>(POSES[0]);
+  const [currentPoseInfo, setCurrentPoseInfo] = useState<Pose>(DEFAULT_FALLBACK_POSES[0]);
   const [countdownNumber, setCountdownNumber] = useState<number | null>(null);
   const [isFlashing, setIsFlashing] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -197,6 +196,10 @@ export default function ShootConsole() {
 
       if (data.template) {
         setActiveTemplate(data.template);
+      }
+
+      if (data.poses && Array.isArray(data.poses) && data.poses.length > 0) {
+        setAvailablePoses(data.poses);
       }
 
       // Check whether guest frame selection step should be displayed
@@ -540,13 +543,28 @@ export default function ShootConsole() {
     });
   };
 
-  // "Surprise me": Fills all empty slots with random poses
+  // "Surprise me": Fills all empty slots with random distinct poses from available active poses
   const handleSurpriseMe = () => {
+    const pool = availablePoses.length > 0 ? availablePoses : DEFAULT_FALLBACK_POSES;
+    if (pool.length === 0) return;
+
     setSelectedPoses((prev) => {
+      // Avoid duplicates if pool has enough distinct poses
+      const alreadyChosen = new Set(prev.filter((p): p is string => p !== null));
+      const availableRemaining = pool.filter((p) => !alreadyChosen.has(p.id));
+
+      const shuffledRemaining = [...availableRemaining].sort(() => Math.random() - 0.5);
+      const shuffledAll = [...pool].sort(() => Math.random() - 0.5);
+
+      let remainIdx = 0;
+      let allIdx = 0;
+
       return prev.map((p) => {
         if (p !== null) return p;
-        const random = POSES[Math.floor(Math.random() * POSES.length)];
-        return random.id;
+        if (remainIdx < shuffledRemaining.length) {
+          return shuffledRemaining[remainIdx++].id;
+        }
+        return shuffledAll[allIdx++ % shuffledAll.length].id;
       });
     });
   };
@@ -555,10 +573,11 @@ export default function ShootConsole() {
   const allPosesSelected =
     selectedPoses.length === totalShots && selectedPoses.every((p) => p !== null);
 
-  // Helper to get pose option from id
-  const getPoseById = (poseId: string | null): PoseOption => {
-    if (!poseId) return POSES[0];
-    return POSES.find((p) => p.id === poseId || p.name === poseId) || POSES[0];
+  // Helper to get pose from id
+  const getPoseById = (poseId: string | null): Pose => {
+    const pool = availablePoses.length > 0 ? availablePoses : DEFAULT_FALLBACK_POSES;
+    if (!poseId) return pool[0];
+    return pool.find((p) => p.id === poseId || p.name === poseId) || pool[0];
   };
 
   // Start fresh sequence from Shot 1
@@ -1036,8 +1055,6 @@ export default function ShootConsole() {
   const canRetakeCurrentShot = currentRetakesLeft > 0;
   const canRetakeAll = retakesLeft.slice(0, totalShots).every((r) => r > 0);
 
-  const CurrentPoseIcon = currentPoseInfo.icon;
-
   // 1. Loading state: neutral editorial full-screen loading view, NEVER render step screens
   if (boothStatus === "loading") {
     return (
@@ -1402,7 +1419,6 @@ export default function ShootConsole() {
                   const isFilled = poseId !== null;
                   const isActive = activeSlotIndex === slotIdx;
                   const poseObj = isFilled ? getPoseById(poseId) : null;
-                  const IconComp = poseObj ? poseObj.icon : Plus;
 
                   return (
                     <button
@@ -1418,14 +1434,24 @@ export default function ShootConsole() {
                         }`}
                     >
                       <div
-                        className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full ${isActive
+                        className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full overflow-hidden ${isActive
                           ? "bg-paper/15 text-accent"
                           : isFilled
                             ? "bg-paper text-accent"
                             : "bg-ink/5 text-muted"
                           }`}
                       >
-                        <IconComp className="h-4 w-4" />
+                        {isFilled && poseObj?.image_url ? (
+                          <img
+                            src={poseObj.image_url}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
+                        ) : isFilled ? (
+                          <Camera className="h-4 w-4" />
+                        ) : (
+                          <Plus className="h-4 w-4" />
+                        )}
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -1452,12 +1478,18 @@ export default function ShootConsole() {
 
             {/* POSE CATALOG TILES */}
             <div className="space-y-1.5">
-              <Label className="text-muted text-[10px]">
-                Available Poses · Tap to fill Shot {activeSlotIndex + 1}
-              </Label>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 max-h-[26vh] sm:max-h-[22vh] overflow-y-auto sm:overflow-visible">
-                {POSES.map((pose) => {
-                  const IconComponent = pose.icon;
+              <div className="flex items-center justify-between px-1">
+                <Label className="text-muted text-[10px]">
+                  Available Poses · Tap to fill Shot {activeSlotIndex + 1}
+                </Label>
+                {availablePoses.length > 0 && availablePoses.length < totalShots && (
+                  <span className="text-[10px] font-mono text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                    Fewer poses available than shots. You can repeat poses across shots.
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 max-h-[30vh] sm:max-h-[26vh] overflow-y-auto pr-1">
+                {(availablePoses.length > 0 ? availablePoses : DEFAULT_FALLBACK_POSES).map((pose) => {
                   const isCurrentSlotPose = selectedPoses[activeSlotIndex] === pose.id;
 
                   return (
@@ -1466,21 +1498,39 @@ export default function ShootConsole() {
                       type="button"
                       onClick={() => handleSelectPoseForActiveSlot(pose.id)}
                       data-selected={isCurrentSlotPose ? "true" : undefined}
-                      className={`group relative flex flex-col items-center justify-between p-2.5 sm:p-3 text-center rounded-tile min-h-[clamp(85px,13vh,120px)] ${isCurrentSlotPose
-                        ? "is-selected bg-surface ring-2 ring-accent text-ink cursor-default"
-                        : "interactive-tile bg-surface text-ink border border-transparent"
-                        }`}
+                      className={`group relative flex flex-col items-center justify-between p-2 sm:p-2.5 text-center rounded-tile min-h-[clamp(90px,14vh,130px)] transition-all overflow-hidden ${
+                        isCurrentSlotPose
+                          ? "is-selected bg-surface ring-2 ring-accent text-ink"
+                          : "interactive-tile bg-surface text-ink border border-ink/5 hover:border-ink/20"
+                      }`}
                     >
-                      <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-paper text-accent mb-1 tile-icon-badge">
-                        <IconComponent className="h-4 w-4 sm:h-5 sm:w-5" />
+                      <div className="relative w-full aspect-[4/3] max-h-[70px] rounded-lg overflow-hidden bg-neutral-900 mb-1 flex items-center justify-center border border-ink/10">
+                        {pose.image_url ? (
+                          <img
+                            src={pose.image_url}
+                            alt={pose.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex items-center justify-center text-accent/80">
+                            <Camera className="h-6 w-6 opacity-75" />
+                          </div>
+                        )}
+                        {isCurrentSlotPose && (
+                          <div className="absolute top-1 right-1 bg-accent text-paper rounded-full p-0.5">
+                            <Check className="h-2.5 w-2.5" />
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <div className="font-display text-xs sm:text-sm uppercase tracking-wide">
+                      <div className="w-full">
+                        <div className="font-display text-xs sm:text-sm uppercase tracking-wide truncate">
                           {pose.name}
                         </div>
-                        <div className="text-[10px] text-muted line-clamp-1 mt-0.5">
-                          {pose.subtitle}
-                        </div>
+                        {pose.description && (
+                          <div className="text-[10px] text-muted line-clamp-1 mt-0.5 font-sans">
+                            {pose.description}
+                          </div>
+                        )}
                       </div>
                     </button>
                   );
@@ -1558,9 +1608,19 @@ export default function ShootConsole() {
               {/* PHASE 1: 3-SECOND POSE INTRO SCREEN BEFORE COUNTDOWN */}
               {countdownPhase === "intro" && !captureError && (
                 <div className="relative z-10 flex flex-col items-center justify-center text-center p-6 space-y-3 animate-scaleIn select-none">
-                  <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-accent/20 text-accent mb-1 border border-accent/40">
-                    <CurrentPoseIcon className="h-8 w-8 sm:h-10 sm:w-10" />
-                  </div>
+                  {currentPoseInfo.image_url ? (
+                    <div className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-2xl overflow-hidden border-2 border-accent/60 shadow-lg mb-1 bg-neutral-900">
+                      <img
+                        src={currentPoseInfo.image_url}
+                        alt={currentPoseInfo.name}
+                        className="h-full w-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-accent/20 text-accent mb-1 border border-accent/40">
+                      <Camera className="h-8 w-8 sm:h-10 sm:w-10" />
+                    </div>
+                  )}
                   <div>
                     <Label tone="accent" className="font-bold tracking-[0.2em] mb-1 block">
                       {retakeTargetIndex !== null
@@ -1570,9 +1630,11 @@ export default function ShootConsole() {
                     <h2 className="font-display text-[clamp(44px,7.5vh,80px)] uppercase tracking-tight text-paper leading-none">
                       {currentPoseInfo.name}
                     </h2>
-                    <p className="text-xs sm:text-sm text-paper/70 font-sans mt-1">
-                      {currentPoseInfo.subtitle}
-                    </p>
+                    {currentPoseInfo.description && (
+                      <p className="text-xs sm:text-sm text-paper/70 font-sans mt-1">
+                        {currentPoseInfo.description}
+                      </p>
+                    )}
                   </div>
                   <div className="pt-2">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-paper/10 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-paper/80">
@@ -1595,6 +1657,31 @@ export default function ShootConsole() {
                   <Label className="text-paper/70 tracking-[0.2em] mt-2 font-bold uppercase">
                     {currentPoseInfo.name} · HOLD IT
                   </Label>
+                </div>
+              )}
+
+              {/* CORNER POSE GUIDE OVERLAY DURING COUNTDOWN */}
+              {countdownPhase === "counting" && countdownNumber !== null && !isCapturing && (
+                <div className="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-20 flex items-center gap-2.5 p-2 rounded-xl bg-black/60 backdrop-blur-md border border-paper/20 shadow-xl pointer-events-none select-none animate-fadeIn">
+                  {currentPoseInfo.image_url ? (
+                    <img
+                      src={currentPoseInfo.image_url}
+                      alt=""
+                      className="h-12 w-12 sm:h-14 sm:w-14 object-cover rounded-lg shrink-0 border border-paper/10"
+                    />
+                  ) : (
+                    <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-lg bg-paper/10 flex items-center justify-center shrink-0">
+                      <Camera className="h-6 w-6 text-accent" />
+                    </div>
+                  )}
+                  <div className="min-w-0 pr-1 text-left">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-accent font-bold block">
+                      Target Pose
+                    </span>
+                    <span className="font-display text-xs sm:text-sm uppercase text-paper tracking-wide block truncate max-w-[120px]">
+                      {currentPoseInfo.name}
+                    </span>
+                  </div>
                 </div>
               )}
 

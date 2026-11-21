@@ -7,7 +7,7 @@ import { POSES, POSE_PREVIEW_PAUSE_MS, type CapturedShot } from "../components/b
 test("Multi-shot sequence captures exactly N distinct shots without state truncation", async () => {
   const totalShots = 3;
   const shots: CapturedShot[] = [];
-  const selectedPoses = ["couple", "group", "peace"];
+  const selectedPoses = [POSES[0].id, POSES[1].id, POSES[2].id];
 
   for (let i = 0; i < totalShots; i++) {
     const poseObj = POSES.find((p) => p.id === selectedPoses[i]) || POSES[0];
@@ -18,13 +18,13 @@ test("Multi-shot sequence captures exactly N distinct shots without state trunca
   }
 
   assert.equal(shots.length, 3);
-  assert.equal(shots[0].poseId, "couple");
-  assert.equal(shots[1].poseId, "group");
-  assert.equal(shots[2].poseId, "peace");
+  assert.equal(shots[0].poseId, POSES[0].id);
+  assert.equal(shots[1].poseId, POSES[1].id);
+  assert.equal(shots[2].poseId, POSES[2].id);
 });
 
 test("Per-shot pose slots: supports repeated poses across multiple slots", async () => {
-  const selectedPoses = ["couple", "couple", "funny"];
+  const selectedPoses = [POSES[0].id, POSES[0].id, POSES[3].id];
 
   const shots: CapturedShot[] = [];
   for (let i = 0; i < selectedPoses.length; i++) {
@@ -33,14 +33,14 @@ test("Per-shot pose slots: supports repeated poses across multiple slots", async
     shots[i] = { image: res.imageUrl!, poseId: selectedPoses[i] };
   }
 
-  assert.equal(shots[0].poseId, "couple");
-  assert.equal(shots[1].poseId, "couple");
-  assert.equal(shots[2].poseId, "funny");
+  assert.equal(shots[0].poseId, POSES[0].id);
+  assert.equal(shots[1].poseId, POSES[0].id);
+  assert.equal(shots[2].poseId, POSES[3].id);
 });
 
 test("Surprise me fills all empty slots with valid poses without overwriting filled ones", () => {
   const totalShots = 3;
-  const initialSlots: (string | null)[] = ["peace", null, null];
+  const initialSlots: (string | null)[] = [POSES[2].id, null, null];
 
   // Simulating handleSurpriseMe
   const filled = initialSlots.map((p) => {
@@ -50,28 +50,28 @@ test("Surprise me fills all empty slots with valid poses without overwriting fil
   });
 
   assert.equal(filled.length, 3);
-  assert.equal(filled[0], "peace"); // untouched
-  assert.equal(filled[1], "couple"); // filled
-  assert.equal(filled[2], "couple"); // filled
+  assert.equal(filled[0], POSES[2].id); // untouched
+  assert.equal(filled[1], POSES[0].id); // filled
+  assert.equal(filled[2], POSES[0].id); // filled
   assert.ok(filled.every((p) => p !== null));
 });
 
 test("Changing a filled slot updates target slot only", () => {
-  const slots: (string | null)[] = ["couple", "group", "peace"];
+  const slots: (string | null)[] = [POSES[0].id, POSES[1].id, POSES[2].id];
   const targetSlot = 1; // Change shot 2
 
-  slots[targetSlot] = "funny";
+  slots[targetSlot] = POSES[3].id;
 
-  assert.equal(slots[0], "couple");
-  assert.equal(slots[1], "funny");
-  assert.equal(slots[2], "peace");
+  assert.equal(slots[0], POSES[0].id);
+  assert.equal(slots[1], POSES[3].id);
+  assert.equal(slots[2], POSES[2].id);
 });
 
 test("Retake shot 2 keeps that shot's own assigned pose", async () => {
   const shots: CapturedShot[] = [
-    { image: "img1", poseId: "couple" },
-    { image: "img2_old", poseId: "funny" },
-    { image: "img3", poseId: "peace" },
+    { image: "img1", poseId: POSES[0].id },
+    { image: "img2_old", poseId: POSES[3].id },
+    { image: "img3", poseId: POSES[2].id },
   ];
 
   const retakeIdx = 1;
@@ -81,10 +81,10 @@ test("Retake shot 2 keeps that shot's own assigned pose", async () => {
   const newCapture = await hardware.capture({ type: "Photo", pose: poseOption.name });
   shots[retakeIdx] = { image: newCapture.imageUrl!, poseId: shots[retakeIdx].poseId };
 
-  assert.equal(shots[0].poseId, "couple");
-  assert.equal(shots[1].poseId, "funny");
+  assert.equal(shots[0].poseId, POSES[0].id);
+  assert.equal(shots[1].poseId, POSES[3].id);
   assert.equal(shots[1].image, newCapture.imageUrl!);
-  assert.equal(shots[2].poseId, "peace");
+  assert.equal(shots[2].poseId, POSES[2].id);
 });
 
 test("Cancel shoot resets slots to empty and clears all state", () => {

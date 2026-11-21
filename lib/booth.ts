@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { supabaseServer } from "./supabase-server";
-import type { PhotoTemplate } from "./types";
+import type { PhotoTemplate, Pose } from "./types";
+import { seedPosesIfEmpty, attachSignedPoseUrl } from "./poses";
 
 export interface BoothGuestContext {
   event: {
@@ -29,6 +30,7 @@ export interface BoothGuestContext {
   };
   template: PhotoTemplate | null;
   eligibleTemplates: PhotoTemplate[];
+  poses: Pose[];
   qrUrl: string;
 }
 
@@ -112,6 +114,24 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
     console.warn("Could not load eligible templates for booth:", err);
   }
 
+  // Retrieve active poses with signed URLs
+  let poses: Pose[] = [];
+  try {
+    await seedPosesIfEmpty();
+    const { data: dbPoses } = await supabaseServer
+      .from("poses")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (dbPoses && dbPoses.length > 0) {
+      poses = await Promise.all(dbPoses.map(attachSignedPoseUrl));
+    }
+  } catch (pErr) {
+    console.warn("Could not load active poses for booth:", pErr);
+  }
+
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     (typeof window !== "undefined" ? window.location.origin : "");
@@ -143,6 +163,7 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
     },
     template: defaultTemplate,
     eligibleTemplates,
+    poses,
     qrUrl,
   };
 }

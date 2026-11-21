@@ -35,6 +35,7 @@ export async function GET(request: Request) {
         },
         template: context.template,
         eligibleTemplates: context.eligibleTemplates,
+        poses: context.poses,
         qrUrl: context.qrUrl,
       },
       {

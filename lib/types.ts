@@ -107,3 +107,14 @@ export interface ShootSession {
   ended_at: string | null;
 }
 
+export interface Pose {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  sort_order: number;
+  image_path?: string | null;
+  image_url?: string | null; // short-lived signed URL for client display
+  created_at?: string;
+}
+

@@ -6,6 +6,7 @@ import type { Event } from "@/lib/types";
 import EventsList from "./EventsList";
 import HardwareStatusPanel from "./HardwareStatusPanel";
 import TemplatesTab from "./TemplatesTab";
+import PosesTab from "./PosesTab";
 import EventModal from "./EventModal";
 import ConfirmModal from "./ConfirmModal";
 import { Pill } from "@/components/ui/Pill";
@@ -26,7 +27,7 @@ export default function EventSetupView({
     initialActiveEvent?.id || initialEvents[0]?.id || ""
   );
 
-  const [currentTab, setCurrentTab] = useState<"setup" | "templates">("setup");
+  const [currentTab, setCurrentTab] = useState<"setup" | "templates" | "poses">("setup");
 
   // Modals state
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -293,15 +294,15 @@ export default function EventSetupView({
             <span>Templates</span>
           </Pill>
 
-          {/* Disabled Tab: Poses */}
-          <div
-            className="flex min-h-[44px] items-center gap-2 rounded-full px-4 text-xs font-mono uppercase tracking-wider text-muted cursor-not-allowed select-none bg-ink/5"
-            title="Guest pose prompt configuration is coming in the next phase"
+          {/* Poses Tab */}
+          <Pill
+            variant={currentTab === "poses" ? "primary" : "secondary"}
+            onClick={() => setCurrentTab("poses")}
+            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
           >
-            <Camera className="h-4 w-4 opacity-50" />
+            <Camera className={`h-4 w-4 ${currentTab === "poses" ? "text-accent" : ""}`} />
             <span>Poses</span>
-            <Label className="text-[10px] opacity-60">Soon</Label>
-          </div>
+          </Pill>
         </div>
 
         {/* Mock Mode Tag */}
@@ -333,13 +334,15 @@ export default function EventSetupView({
               onCloseEvent={handleCloseEvent}
               onDeleteEvent={handleDeleteEvent}
             />
-          ) : (
+          ) : currentTab === "templates" ? (
             <TemplatesTab
               selectedEvent={selectedEvent}
               allEvents={events}
               onUpdateEventShots={handleUpdateEventShots}
               onUpdateEventMode={(m) => handleUpdateEventMode(selectedEvent.id, m)}
             />
+          ) : (
+            <PosesTab />
           )}
         </div>
       </div>
