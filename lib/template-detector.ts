@@ -117,10 +117,120 @@ export function detectTransparentWindows(
     }
   }
 
-  // Sort top-to-bottom
-  slots.sort((a, b) => a.y - b.y);
+// Sort top-to-bottom, then left-to-right for side-by-side windows
+  slots.sort((a, b) => {
+    // If slots are on roughly the same horizontal row (within 20px), sort left to right
+    if (Math.abs(a.y - b.y) <= 20) {
+      return a.x - b.x;
+    }
+    return a.y - b.y;
+  });
 
   return slots;
+}
+
+/**
+ * Calculates the percentage of pixels that are transparent (alpha <= threshold).
+ */
+export function calculateTransparencyRatio(
+  image: ImageDataLike,
+  alphaThreshold = 30
+): number {
+  const { width, height, data } = image;
+  const totalPixels = width * height;
+  if (totalPixels === 0) return 0;
+
+  let transparentPixels = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] <= alphaThreshold) {
+      transparentPixels++;
+    }
+  }
+
+  return transparentPixels / totalPixels;
+}
+
+export type TemplateMode = "frame" | "background";
+
+export interface TemplateAnalysisResult {
+  mode: TemplateMode;
+  transparentRatio: number;
+  windows: TemplateSlot[];
+  summary: string;
+}
+
+/**
+ * Analyzes an uploaded template image:
+ * If it is a PNG with at least 3% transparent area and detected transparent window cutouts,
+ * it is treated as a FRAME OVERLAY.
+ * Otherwise, it is treated as a BACKGROUND image.
+ */
+export function analyzeTemplateImage(
+  image: ImageDataLike,
+  isPng: boolean
+): TemplateAnalysisResult {
+  const transparentRatio = calculateTransparencyRatio(image);
+
+  if (isPng && transparentRatio >= 0.03) {
+    const windows = detectTransparentWindows(image);
+    if (windows.length > 0) {
+      return {
+        mode: "frame",
+        transparentRatio,
+        windows,
+        summary: `Frame with ${windows.length} window${windows.length === 1 ? "" : "s"} detected (${(transparentRatio * 100).toFixed(1)}% transparent)`,
+      };
+    }
+  }
+
+  return {
+    mode: "background",
+    transparentRatio,
+    windows: [],
+    summary: "Background image: set your photo slots below",
+  };
+}
+
+export interface AspectRatioValidation {
+  isStandard: boolean;
+  aspectRatio: number;
+  message?: string;
+}
+
+/**
+ * Validates whether the canvas dimensions match standard photo booth print ratios:
+ * - 2x6 strip (1:3 ratio, e.g. 600 x 1800 px)
+ * - 4x6 sheet (1:1.5 or 2:3 ratio, e.g. 1200 x 1800 px)
+ */
+export function validateCanvasAspectRatio(
+  width: number,
+  height: number
+): AspectRatioValidation {
+  if (width <= 0 || height <= 0) {
+    return { isStandard: false, aspectRatio: 0, message: "Invalid dimensions" };
+  }
+
+  const ratio = width / height;
+
+  // 1:3 vertical strip (approx 0.333, tolerance ±15%: 0.28 to 0.38)
+  const is2x6Strip = ratio >= 0.28 && ratio <= 0.38;
+
+  // 1:1.5 (2:3) portrait sheet (approx 0.667, tolerance ±15%: 0.57 to 0.77)
+  const is4x6Sheet = ratio >= 0.57 && ratio <= 0.77;
+
+  // 1.5 landscape sheet (approx 1.5, tolerance ±15%: 1.28 to 1.72)
+  const isLandscapeSheet = ratio >= 1.28 && ratio <= 1.72;
+
+  if (is2x6Strip || is4x6Sheet || isLandscapeSheet) {
+    return { isStandard: true, aspectRatio: ratio };
+  }
+
+  return {
+    isStandard: false,
+    aspectRatio: ratio,
+    message:
+      "Image aspect ratio differs from standard print sizes. Recommended: 600 × 1800 px (2×6 strip) or 1200 × 1800 px (4×6 sheet).",
+  };
 }
 
 /**

@@ -27,16 +27,21 @@ export async function POST(request: Request) {
     }
 
     let captureType = "PHOTO";
+    let templateId: string | null | undefined = undefined;
     try {
       const body = await request.json();
       if (body && typeof body.captureType === "string") {
         captureType = body.captureType;
       }
+      if (body && (typeof body.templateId === "string" || body.templateId === null)) {
+        templateId = body.templateId;
+      }
     } catch {}
 
     const session = await db.getOrCreateShootSession(
       context.queueEntry.id,
-      captureType
+      captureType,
+      templateId
     );
 
     return NextResponse.json(
@@ -50,6 +55,48 @@ export async function POST(request: Request) {
     );
   } catch (error: any) {
     console.error("[Booth API] Error creating/fetching shoot session:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const ip = getClientIp(request);
+  const rateLimit = checkBoothRateLimit(ip);
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment." },
+      { status: 429, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  try {
+    const body = await request.json();
+    const { sessionId, templateId } = body || {};
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: "sessionId is required" },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    const success = await db.updateShootSessionTemplate(sessionId, templateId || null);
+
+    return NextResponse.json(
+      { success, templateId },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+          "X-RateLimit-Remaining": String(rateLimit.remaining),
+        },
+      }
+    );
+  } catch (error: any) {
+    console.error("[Booth API] Error updating shoot session template:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500, headers: { "Cache-Control": "no-store" } }

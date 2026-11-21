@@ -34,6 +34,7 @@ export async function GET(request: Request) {
           queue_number: context.guest.queue_number,
         },
         template: context.template,
+        eligibleTemplates: context.eligibleTemplates,
         qrUrl: context.qrUrl,
       },
       {

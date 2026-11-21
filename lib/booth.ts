@@ -12,6 +12,7 @@ export interface BoothGuestContext {
     print_layout: string;
     max_prints_per_guest: number;
     include_gif?: boolean;
+    template_mode?: "OPERATOR" | "GUEST";
     start_time: string;
   };
   queueEntry: {
@@ -27,6 +28,7 @@ export interface BoothGuestContext {
     guest_token: string;
   };
   template: PhotoTemplate | null;
+  eligibleTemplates: PhotoTemplate[];
   qrUrl: string;
 }
 
@@ -53,44 +55,61 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
   const inProgress = queue.find((entry) => entry.status === "IN_PROGRESS");
   if (!inProgress || !inProgress.guest) return null;
 
-  // Retrieve active template for this event if one exists
-  let activeTemplate: PhotoTemplate | null = null;
+  // Retrieve eligible templates for this event (is_active = true, shots_count matches)
+  const eligibleTemplates: PhotoTemplate[] = [];
+  let defaultTemplate: PhotoTemplate | null = null;
+
   try {
-    const { data: template } = await supabaseServer
+    const { data: templates } = await supabaseServer
       .from("templates")
       .select("*")
       .eq("event_id", activeEvent.id)
       .eq("is_active", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false });
 
-    if (template) {
-      let frame_url: string | null = null;
-      let background_url: string | null = null;
+    if (templates && templates.length > 0) {
+      for (const t of templates) {
+        // Exclude templates whose shots count does not match the event's shots_per_guest
+        const targetShots = activeEvent.shots_per_guest ?? 3;
+        if (t.shots_count !== targetShots) {
+          continue;
+        }
 
-      if (template.frame_path) {
-        const { data: signedFrame } = await supabaseServer.storage
-          .from("templates")
-          .createSignedUrl(template.frame_path, 3600);
-        frame_url = signedFrame?.signedUrl || null;
+        let frame_url: string | null = null;
+        let background_url: string | null = null;
+
+        if (t.frame_path) {
+          const { data: signedFrame } = await supabaseServer.storage
+            .from("templates")
+            .createSignedUrl(t.frame_path, 3600);
+          frame_url = signedFrame?.signedUrl || null;
+        }
+
+        if (t.background_path) {
+          const { data: signedBg } = await supabaseServer.storage
+            .from("templates")
+            .createSignedUrl(t.background_path, 3600);
+          background_url = signedBg?.signedUrl || null;
+        }
+
+        const fullTemplate: PhotoTemplate = {
+          ...t,
+          frame_url,
+          background_url,
+        };
+
+        eligibleTemplates.push(fullTemplate);
       }
 
-      if (template.background_path) {
-        const { data: signedBg } = await supabaseServer.storage
-          .from("templates")
-          .createSignedUrl(template.background_path, 3600);
-        background_url = signedBg?.signedUrl || null;
-      }
-
-      activeTemplate = {
-        ...template,
-        frame_url,
-        background_url,
-      };
+      // Default template is either marked is_default or first eligible
+      defaultTemplate =
+        eligibleTemplates.find((t) => t.is_default) ||
+        eligibleTemplates[0] ||
+        null;
     }
   } catch (err) {
-    console.warn("Could not load active template for booth:", err);
+    console.warn("Could not load eligible templates for booth:", err);
   }
 
   const baseUrl =
@@ -108,6 +127,7 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
       print_layout: activeEvent.print_layout ?? "STRIP",
       max_prints_per_guest: activeEvent.max_prints_per_guest ?? 1,
       include_gif: activeEvent.include_gif ?? false,
+      template_mode: activeEvent.template_mode || "OPERATOR",
       start_time: activeEvent.start_time,
     },
     queueEntry: {
@@ -121,7 +141,8 @@ export async function getCurrentBoothGuest(): Promise<BoothGuestContext | null> 
       queue_number: inProgress.queue_number,
       guest_token: inProgress.guest.guest_token,
     },
-    template: activeTemplate,
+    template: defaultTemplate,
+    eligibleTemplates,
     qrUrl,
   };
 }

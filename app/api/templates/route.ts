@@ -108,6 +108,72 @@ export async function POST(request: Request) {
       const body = await request.json();
       const { action, templateId, eventId, slots } = body;
 
+      if (action === "set_default") {
+        if (!templateId || !eventId) {
+          return NextResponse.json({ error: "templateId and eventId are required" }, { status: 400 });
+        }
+
+        // Unset is_default on all templates for this event
+        const { error: resetErr } = await supabaseServer
+          .from("templates")
+          .update({ is_default: false })
+          .eq("event_id", eventId);
+
+        if (resetErr) {
+          return NextResponse.json({ error: resetErr.message }, { status: 500 });
+        }
+
+        // Set target template as default and ensure it is available (is_active: true)
+        const { data: updated, error: setErr } = await supabaseServer
+          .from("templates")
+          .update({ is_default: true, is_active: true })
+          .eq("id", templateId)
+          .select()
+          .single();
+
+        if (setErr) {
+          return NextResponse.json({ error: setErr.message }, { status: 500 });
+        }
+
+        const withUrls = await attachSignedUrls(updated);
+        return NextResponse.json({ success: true, template: withUrls });
+      }
+
+      if (action === "toggle_active") {
+        const { isActive } = body;
+        if (!templateId || typeof isActive !== "boolean") {
+          return NextResponse.json({ error: "templateId and boolean isActive are required" }, { status: 400 });
+        }
+
+        // Check if template is currently default
+        const { data: existing } = await supabaseServer
+          .from("templates")
+          .select("is_default")
+          .eq("id", templateId)
+          .maybeSingle();
+
+        if (existing?.is_default && !isActive) {
+          return NextResponse.json(
+            { error: "Deactivating the default template is not allowed. Choose another default first." },
+            { status: 400 }
+          );
+        }
+
+        const { data: updated, error: tErr } = await supabaseServer
+          .from("templates")
+          .update({ is_active: isActive })
+          .eq("id", templateId)
+          .select()
+          .single();
+
+        if (tErr) {
+          return NextResponse.json({ error: tErr.message }, { status: 500 });
+        }
+
+        const withUrls = await attachSignedUrls(updated);
+        return NextResponse.json({ success: true, template: withUrls });
+      }
+
       if (action === "set_active") {
         if (!templateId || !eventId) {
           return NextResponse.json({ error: "templateId and eventId are required" }, { status: 400 });
@@ -144,15 +210,34 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "templateId is required" }, { status: 400 });
         }
 
-        // Find template to get file paths
+        // Find template to get file paths and check if active
         const { data: existing } = await supabaseServer
           .from("templates")
-          .select("frame_path, background_path, event_id")
+          .select("frame_path, background_path, event_id, is_active")
           .eq("id", templateId)
           .maybeSingle();
 
+        const wasActive = existing?.is_active === true;
+
         if (existing) {
-          const filesToRemove = [existing.frame_path, existing.background_path].filter(Boolean) as string[];
+          // Only remove storage files if no other template references them (e.g. duplicates/copies)
+          const filesToRemove: string[] = [];
+          if (existing.frame_path) {
+            const { count } = await supabaseServer
+              .from("templates")
+              .select("id", { count: "exact", head: true })
+              .eq("frame_path", existing.frame_path)
+              .neq("id", templateId);
+            if (!count || count === 0) filesToRemove.push(existing.frame_path);
+          }
+          if (existing.background_path) {
+            const { count } = await supabaseServer
+              .from("templates")
+              .select("id", { count: "exact", head: true })
+              .eq("background_path", existing.background_path)
+              .neq("id", templateId);
+            if (!count || count === 0) filesToRemove.push(existing.background_path);
+          }
           if (filesToRemove.length > 0) {
             await supabaseServer.storage.from("templates").remove(filesToRemove);
           }
@@ -167,7 +252,119 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: delErr.message }, { status: 500 });
         }
 
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, wasActive });
+      }
+
+      if (action === "rename") {
+        const { name } = body;
+        if (!templateId || !name || typeof name !== "string" || !name.trim()) {
+          return NextResponse.json(
+            { error: "templateId and non-empty name are required" },
+            { status: 400 }
+          );
+        }
+
+        const { data: updated, error: rErr } = await supabaseServer
+          .from("templates")
+          .update({ name: name.trim() })
+          .eq("id", templateId)
+          .select()
+          .single();
+
+        if (rErr) {
+          return NextResponse.json({ error: rErr.message }, { status: 500 });
+        }
+
+        const withUrls = await attachSignedUrls(updated);
+        return NextResponse.json({ success: true, template: withUrls });
+      }
+
+      if (action === "duplicate") {
+        if (!templateId) {
+          return NextResponse.json({ error: "templateId is required" }, { status: 400 });
+        }
+
+        const { data: existing, error: getErr } = await supabaseServer
+          .from("templates")
+          .select("*")
+          .eq("id", templateId)
+          .single();
+
+        if (getErr || !existing) {
+          return NextResponse.json({ error: "Template not found" }, { status: 404 });
+        }
+
+        const newId = crypto.randomUUID();
+        const { data: duplicated, error: dupErr } = await supabaseServer
+          .from("templates")
+          .insert({
+            id: newId,
+            event_id: existing.event_id,
+            name: `${existing.name} (Copy)`,
+            layout: existing.layout,
+            shots_count: existing.shots_count,
+            canvas_width: existing.canvas_width,
+            canvas_height: existing.canvas_height,
+            slots: existing.slots,
+            frame_path: existing.frame_path,
+            background_path: existing.background_path,
+            is_active: false,
+          })
+          .select()
+          .single();
+
+        if (dupErr) {
+          return NextResponse.json({ error: dupErr.message }, { status: 500 });
+        }
+
+        const withUrls = await attachSignedUrls(duplicated);
+        return NextResponse.json({ success: true, template: withUrls });
+      }
+
+      if (action === "copy_to_event") {
+        const { targetEventId } = body;
+        if (!templateId || !targetEventId) {
+          return NextResponse.json(
+            { error: "templateId and targetEventId are required" },
+            { status: 400 }
+          );
+        }
+
+        const { data: existing, error: getErr } = await supabaseServer
+          .from("templates")
+          .select("*")
+          .eq("id", templateId)
+          .single();
+
+        if (getErr || !existing) {
+          return NextResponse.json({ error: "Template not found" }, { status: 404 });
+        }
+
+        const newId = crypto.randomUUID();
+        const { data: copied, error: copyErr } = await supabaseServer
+          .from("templates")
+          .insert({
+            id: newId,
+            event_id: targetEventId,
+            name: existing.name,
+            layout: existing.layout,
+            shots_count: existing.shots_count,
+            canvas_width: existing.canvas_width,
+            canvas_height: existing.canvas_height,
+            slots: existing.slots,
+            frame_path: existing.frame_path,
+            background_path: existing.background_path,
+            is_active: false,
+          })
+          .select()
+          .single();
+
+        if (copyErr) {
+          return NextResponse.json({ error: copyErr.message }, { status: 500 });
+        }
+
+        const withUrls = await attachSignedUrls(copied);
+        return NextResponse.json({ success: true, template: withUrls });
       }
 
       if (action === "update_slots") {
@@ -204,8 +401,19 @@ export async function POST(request: Request) {
       const slotsJson = formData.get("slots") as string;
       const setActiveStr = formData.get("setActive") as string;
 
-      const frameFile = formData.get("frame") as File | null;
-      const backgroundFile = formData.get("background") as File | null;
+      const templateImage = (formData.get("file") || formData.get("templateImage")) as File | null;
+      const mode = (formData.get("mode") as string) || "frame";
+
+      let frameFile = formData.get("frame") as File | null;
+      let backgroundFile = formData.get("background") as File | null;
+
+      if (templateImage && templateImage.size > 0) {
+        if (mode === "frame") {
+          frameFile = templateImage;
+        } else {
+          backgroundFile = templateImage;
+        }
+      }
 
       if (!eventId || !name) {
         return NextResponse.json(
@@ -219,7 +427,7 @@ export async function POST(request: Request) {
 
       if (!hasFrame && !hasBackground) {
         return NextResponse.json(
-          { error: "At least one image (Frame overlay or Background) is required" },
+          { error: "A template image (PNG or JPG, max 5 MB) is required" },
           { status: 400 }
         );
       }
@@ -227,7 +435,7 @@ export async function POST(request: Request) {
       // Validate file size and type
       const allowedTypes = ["image/png", "image/jpeg", "image/jpg"];
 
-      if (hasFrame) {
+      if (frameFile && frameFile.size > 0) {
         if (frameFile.size > MAX_BYTES) {
           return NextResponse.json(
             { error: `Frame image exceeds 5 MB limit (${(frameFile.size / 1024 / 1024).toFixed(1)} MB)` },
@@ -242,7 +450,7 @@ export async function POST(request: Request) {
         }
       }
 
-      if (hasBackground) {
+      if (backgroundFile && backgroundFile.size > 0) {
         if (backgroundFile.size > MAX_BYTES) {
           return NextResponse.json(
             { error: `Background image exceeds 5 MB limit (${(backgroundFile.size / 1024 / 1024).toFixed(1)} MB)` },
@@ -262,7 +470,7 @@ export async function POST(request: Request) {
       let backgroundPath: string | null = null;
 
       // Upload Frame
-      if (hasFrame) {
+      if (frameFile && frameFile.size > 0) {
         const frameExt = frameFile.type === "image/png" ? "png" : "jpg";
         framePath = `${eventId}/${templateId}/frame.${frameExt}`;
         const frameBuffer = Buffer.from(await frameFile.arrayBuffer());
@@ -281,7 +489,7 @@ export async function POST(request: Request) {
       }
 
       // Upload Background
-      if (hasBackground) {
+      if (backgroundFile && backgroundFile.size > 0) {
         const bgExt = backgroundFile.type === "image/png" ? "png" : "jpg";
         backgroundPath = `${eventId}/${templateId}/background.${bgExt}`;
         const bgBuffer = Buffer.from(await backgroundFile.arrayBuffer());
@@ -311,12 +519,15 @@ export async function POST(request: Request) {
 
       const shouldSetActive = setActiveStr === "true";
 
-      if (shouldSetActive) {
-        await supabaseServer
-          .from("templates")
-          .update({ is_active: false })
-          .eq("event_id", eventId);
-      }
+      // Check if this event already has a default template
+      const { count: defaultCount } = await supabaseServer
+        .from("templates")
+        .select("id", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .eq("is_default", true);
+
+      const isFirstDefault = !defaultCount || defaultCount === 0;
+      const isDefault = isFirstDefault;
 
       const { data: newRow, error: insertErr } = await supabaseServer
         .from("templates")
@@ -331,7 +542,8 @@ export async function POST(request: Request) {
           slots,
           frame_path: framePath,
           background_path: backgroundPath,
-          is_active: shouldSetActive,
+          is_active: isDefault ? true : shouldSetActive,
+          is_default: isDefault,
         })
         .select()
         .single();

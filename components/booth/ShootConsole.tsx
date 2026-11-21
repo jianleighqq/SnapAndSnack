@@ -35,7 +35,7 @@ import { toBinaryImageBlob } from "@/lib/image-convert";
 import type { QueueEntryWithGuest, Event, PhotoTemplate } from "@/lib/types";
 import QRCode from "qrcode";
 
-export type ShootStep = "choose" | "countdown" | "preview" | "output";
+export type ShootStep = "frame" | "choose" | "countdown" | "preview" | "output";
 export type PreviewMode = "single" | "summary";
 export type BoothStatus = "loading" | "ready" | "no_guest" | "error";
 
@@ -73,6 +73,10 @@ export default function ShootConsole() {
 
   // Step state
   const [step, setStep] = useState<ShootStep>("choose");
+
+  // Guest frame selection state
+  const [eligibleTemplates, setEligibleTemplates] = useState<PhotoTemplate[]>([]);
+  const [isChangingFrameModalOpen, setIsChangingFrameModalOpen] = useState(false);
 
   // Step 1: Per-shot pose slot selections
   const totalShots = Math.max(1, Math.min(4, activeEvent?.shots_per_guest || 3));
@@ -187,9 +191,25 @@ export default function ShootConsole() {
         setSelectedPoses(new Array(count).fill(null));
       }
 
+      if (data.eligibleTemplates) {
+        setEligibleTemplates(data.eligibleTemplates);
+      }
+
       if (data.template) {
         setActiveTemplate(data.template);
       }
+
+      // Check whether guest frame selection step should be displayed
+      const canChooseFrame =
+        data.event?.template_mode === "GUEST" &&
+        (data.eligibleTemplates?.length ?? 0) >= 2;
+
+      setStep((curr) => {
+        if (curr === "countdown" || curr === "preview" || curr === "output") {
+          return curr;
+        }
+        return canChooseFrame ? "frame" : "choose";
+      });
 
       if (data.guest) {
         setActiveEntry({
@@ -222,7 +242,10 @@ export default function ShootConsole() {
         const sessionRes = await fetch("/api/booth/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ captureType: "PHOTO" }),
+          body: JSON.stringify({
+            captureType: "PHOTO",
+            templateId: data.template?.id || null,
+          }),
         });
         if (sessionRes.ok) {
           const sData = await sessionRes.json();
@@ -688,20 +711,48 @@ export default function ShootConsole() {
     }
   };
 
+  // Handle guest frame selection or change
+  const handleSelectFrame = async (tpl: PhotoTemplate) => {
+    setActiveTemplate(tpl);
+    if (sessionIdRef.current) {
+      try {
+        await fetch("/api/booth/session", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: sessionIdRef.current,
+            templateId: tpl.id,
+          }),
+        });
+      } catch (err) {
+        console.warn("Could not patch shoot session template:", err);
+      }
+    }
+  };
+
+  const handleChangeFrameOnSummary = async (tpl: PhotoTemplate) => {
+    await handleSelectFrame(tpl);
+    setIsChangingFrameModalOpen(false);
+    const composed = await buildComposedStrip(tpl);
+    setComposedImageUrl(composed);
+    uploadComposedStrip(composed);
+  };
+
   // Builds the strip: uses custom event template if active, else falls back to default layout
-  const buildComposedStrip = async (): Promise<string> => {
+  const buildComposedStrip = async (tplOverride?: PhotoTemplate | null): Promise<string> => {
+    const tpl = tplOverride !== undefined ? tplOverride : activeTemplate;
     const currentList = shotsRef.current.length > 0 ? shotsRef.current : capturedShots;
     const shotUrls = currentList.map((s) => s.image);
 
-    if (activeTemplate && activeTemplate.slots && activeTemplate.slots.length > 0) {
+    if (tpl && tpl.slots && tpl.slots.length > 0) {
       try {
         const customStrip = await renderTemplateStrip({
-          canvasWidth: activeTemplate.canvas_width,
-          canvasHeight: activeTemplate.canvas_height,
-          slots: activeTemplate.slots,
+          canvasWidth: tpl.canvas_width,
+          canvasHeight: tpl.canvas_height,
+          slots: tpl.slots,
           shots: shotUrls,
-          frameUrl: activeTemplate.frame_url,
-          backgroundUrl: activeTemplate.background_url,
+          frameUrl: tpl.frame_url,
+          backgroundUrl: tpl.background_url,
         });
         return customStrip;
       } catch (err) {
@@ -975,6 +1026,11 @@ export default function ShootConsole() {
   const guestToken = activeEntry?.guest?.guest_token || "";
   const layoutLabel = activeEvent?.print_layout || "STRIP";
 
+  // Check if guest frame selection step should be shown
+  const hasFrameStep = Boolean(
+    activeEvent?.template_mode === "GUEST" && eligibleTemplates.length >= 2
+  );
+
   // Retake metrics
   const currentRetakesLeft = retakesLeft[reviewIndex] ?? maxRetakesAllowed;
   const canRetakeCurrentShot = currentRetakesLeft > 0;
@@ -1134,17 +1190,32 @@ export default function ShootConsole() {
 
           <div className="flex items-center gap-3">
             <Label className="text-muted">
-              {step === "choose" && "STEP 1 OF 4 · CHOOSE POSES"}
-              {step === "countdown" && "STEP 2 OF 4 · GET READY"}
-              {step === "preview" &&
-                (previewMode === "single"
-                  ? `STEP 3 OF 4 · REVIEW (${reviewIndex + 1}/${totalShots})`
-                  : "STEP 3 OF 4 · REVIEW SUMMARY")}
-              {step === "output" && "STEP 4 OF 4 · COLLECT"}
+              {hasFrameStep ? (
+                <>
+                  {step === "frame" && "STEP 1 OF 5 · CHOOSE FRAME"}
+                  {step === "choose" && "STEP 2 OF 5 · CHOOSE POSES"}
+                  {step === "countdown" && "STEP 3 OF 5 · GET READY"}
+                  {step === "preview" &&
+                    (previewMode === "single"
+                      ? `STEP 4 OF 5 · REVIEW (${reviewIndex + 1}/${totalShots})`
+                      : "STEP 4 OF 5 · REVIEW SUMMARY")}
+                  {step === "output" && "STEP 5 OF 5 · COLLECT"}
+                </>
+              ) : (
+                <>
+                  {step === "choose" && "STEP 1 OF 4 · CHOOSE POSES"}
+                  {step === "countdown" && "STEP 2 OF 4 · GET READY"}
+                  {step === "preview" &&
+                    (previewMode === "single"
+                      ? `STEP 3 OF 4 · REVIEW (${reviewIndex + 1}/${totalShots})`
+                      : "STEP 3 OF 4 · REVIEW SUMMARY")}
+                  {step === "output" && "STEP 4 OF 4 · COLLECT"}
+                </>
+              )}
             </Label>
 
-            {/* Cancel shoot button stays accessible in steps 1 and 2 */}
-            {(step === "choose" || step === "countdown") && (
+            {/* Cancel shoot button stays accessible in initial setup steps */}
+            {(step === "frame" || step === "choose" || step === "countdown") && (
               <button
                 type="button"
                 onClick={() => setShowCancelPrompt(true)}
@@ -1162,12 +1233,114 @@ export default function ShootConsole() {
 
       {/* MAIN STEP CONTENT - Fluid responsive layout across tablets, laptops and desktops */}
       <main className="relative z-10 flex flex-1 flex-col justify-center overflow-y-auto no-scrollbar py-2 sm:py-3">
-        {/* STEP 1: CHOOSE PER-SHOT POSES */}
+        {/* STEP 1 (GUEST MODE & >=2 ELIGIBLE TEMPLATES): CHOOSE YOUR FRAME */}
+        {step === "frame" && (
+          <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col justify-center space-y-4 sm:space-y-6 animate-fadeIn">
+            {/* Header / Subtitle */}
+            <div className="text-center space-y-1">
+              <Label tone="accent">Step 01 · Personalize Your Photos</Label>
+              <h1 className="font-display text-[clamp(28px,4.5vh,48px)] uppercase tracking-tight leading-tight">
+                Choose Your <span className="text-accent">Frame</span>
+              </h1>
+              <p className="font-sans text-xs sm:text-sm text-muted">
+                Pick your favorite style for your photo strip. Your photos will be printed in this design.
+              </p>
+            </div>
+
+            {/* Grid of Eligible Templates */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4 w-full max-h-[50vh] overflow-y-auto p-1">
+              {eligibleTemplates.map((tpl) => {
+                const isSelected = activeTemplate?.id === tpl.id;
+                const isFrame = Boolean(tpl.frame_url);
+
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => handleSelectFrame(tpl)}
+                    className={`relative flex flex-col items-center justify-between p-3 rounded-tile text-left transition-all overflow-hidden border ${
+                      isSelected
+                        ? "bg-paper border-accent ring-2 ring-accent shadow-md"
+                        : "bg-surface hover:bg-paper/80 border-ink/10 hover:border-ink/30"
+                    }`}
+                  >
+                    <div className="w-full flex items-center justify-between pb-2 text-[11px] font-mono">
+                      <span className="font-bold text-ink truncate max-w-[130px]">
+                        {tpl.name}
+                      </span>
+                      {isSelected ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-accent font-bold uppercase">
+                          <Check className="h-3 w-3" /> Selected
+                        </span>
+                      ) : tpl.is_default ? (
+                        <span className="text-[10px] text-muted uppercase">Default</span>
+                      ) : null}
+                    </div>
+
+                    {/* Preview thumbnail with sample slots */}
+                    <div className="relative w-full aspect-[2/3] max-h-[220px] rounded-lg overflow-hidden bg-neutral-900 border border-ink/10 flex items-center justify-center p-1">
+                      {tpl.background_url && (
+                        <img
+                          src={tpl.background_url}
+                          alt="Background"
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                      )}
+                      {tpl.slots?.map((s, i) => (
+                        <div
+                          key={i}
+                          className="absolute border border-accent/40 bg-accent/20 flex items-center justify-center text-[8px] font-mono text-paper font-bold"
+                          style={{
+                            left: `${(s.x / tpl.canvas_width) * 100}%`,
+                            top: `${(s.y / tpl.canvas_height) * 100}%`,
+                            width: `${(s.w / tpl.canvas_width) * 100}%`,
+                            height: `${(s.h / tpl.canvas_height) * 100}%`,
+                          }}
+                        >
+                          #{i + 1}
+                        </div>
+                      ))}
+                      {tpl.frame_url && (
+                        <img
+                          src={tpl.frame_url}
+                          alt="Frame"
+                          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                        />
+                      )}
+                    </div>
+
+                    <div className="w-full pt-2 flex items-center justify-between text-[10px] font-mono text-muted uppercase">
+                      <span>{tpl.shots_count} shots</span>
+                      <span>{isFrame ? "Frame" : "Background"}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Continue Button */}
+            <div className="flex justify-center pt-2">
+              <Pill
+                variant="primary"
+                size="lg"
+                onClick={() => setStep("choose")}
+                className="min-h-[52px] px-10 text-xs sm:text-sm font-mono uppercase tracking-wider gap-2"
+              >
+                <span>Continue</span>
+                <ArrowRight className="h-4 w-4" />
+              </Pill>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2: CHOOSE PER-SHOT POSES */}
         {step === "choose" && (
           <div className="mx-auto flex min-h-0 flex-1 w-full max-w-5xl flex-col justify-center space-y-3 sm:space-y-4 animate-fadeIn">
             {/* Header / Subtitle */}
             <div className="text-center space-y-1">
-              <Label tone="accent">Step 01 · Plan Your Sequence</Label>
+              <Label tone="accent">
+                {hasFrameStep ? "Step 02 · Plan Your Sequence" : "Step 01 · Plan Your Sequence"}
+              </Label>
               <h1 className="font-display text-[clamp(28px,4.5vh,48px)] uppercase tracking-tight leading-tight">
                 Pick Your <span className="text-accent">Poses</span>
               </h1>
@@ -1705,8 +1878,20 @@ export default function ShootConsole() {
               </div>
             </div>
 
-            {/* Bottom Buttons: Retake All & Looks Good */}
+            {/* Bottom Buttons: Change Frame, Retake All & Looks Good */}
             <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+              {eligibleTemplates.length >= 2 && (
+                <Pill
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setIsChangingFrameModalOpen(true)}
+                  className="min-h-[48px] px-6 text-xs font-mono uppercase tracking-wider gap-1.5"
+                >
+                  <Sparkles className="h-4 w-4 text-accent" />
+                  <span>Change Frame</span>
+                </Pill>
+              )}
+
               <Pill
                 variant="secondary"
                 size="md"
@@ -2107,6 +2292,98 @@ export default function ShootConsole() {
             </Pill>
           </div>
         </Tile>
+      </Modal>
+
+      {/* CHANGE FRAME MODAL ON REVIEW SUMMARY */}
+      <Modal
+        isOpen={isChangingFrameModalOpen}
+        onClose={() => setIsChangingFrameModalOpen(false)}
+      >
+        <div className="p-6 bg-paper rounded-tile border border-ink/10 space-y-4 max-w-2xl w-full mx-auto max-h-[80vh] flex flex-col">
+          <div className="flex items-center justify-between border-b border-ink/10 pb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-accent" />
+              <h3 className="font-display text-lg uppercase tracking-wide">
+                Change Strip Frame
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsChangingFrameModalOpen(false)}
+              className="text-xs font-mono uppercase text-muted hover:text-ink"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <p className="text-xs text-muted">
+            Choose a different frame design for your strip. Your existing photos will be re-composed immediately.
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto flex-1 p-1">
+            {eligibleTemplates.map((tpl) => {
+              const isSelected = activeTemplate?.id === tpl.id;
+              const isFrame = Boolean(tpl.frame_url);
+
+              return (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() => handleChangeFrameOnSummary(tpl)}
+                  className={`p-3 rounded-tile border text-left flex flex-col justify-between transition-all ${
+                    isSelected
+                      ? "bg-paper border-accent ring-2 ring-accent"
+                      : "bg-surface hover:bg-paper/80 border-ink/10"
+                  }`}
+                >
+                  <div className="w-full flex items-center justify-between pb-1 text-[11px] font-mono">
+                    <span className="font-bold text-ink truncate">{tpl.name}</span>
+                    {isSelected && (
+                      <span className="text-[10px] text-accent font-bold uppercase">
+                        Active
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="relative w-full aspect-[2/3] max-h-[160px] rounded-lg overflow-hidden bg-neutral-900 border border-ink/10 flex items-center justify-center p-1 my-1">
+                    {tpl.background_url && (
+                      <img
+                        src={tpl.background_url}
+                        alt="Background"
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    )}
+                    {tpl.slots?.map((s, i) => (
+                      <div
+                        key={i}
+                        className="absolute border border-accent/40 bg-accent/20 flex items-center justify-center text-[8px] font-mono text-paper font-bold"
+                        style={{
+                          left: `${(s.x / tpl.canvas_width) * 100}%`,
+                          top: `${(s.y / tpl.canvas_height) * 100}%`,
+                          width: `${(s.w / tpl.canvas_width) * 100}%`,
+                          height: `${(s.h / tpl.canvas_height) * 100}%`,
+                        }}
+                      >
+                        #{i + 1}
+                      </div>
+                    ))}
+                    {tpl.frame_url && (
+                      <img
+                        src={tpl.frame_url}
+                        alt="Frame"
+                        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                      />
+                    )}
+                  </div>
+
+                  <span className="text-[10px] font-mono text-muted uppercase">
+                    {isFrame ? "Frame" : "Background"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </Modal>
     </div>
   );

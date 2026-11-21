@@ -226,6 +226,48 @@ export default function EventSetupView({
     });
   };
 
+  // Update event shots_per_guest setting
+  const handleUpdateEventShots = async (eventId: string, newShots: number) => {
+    const target = events.find((e) => e.id === eventId);
+    if (!target) return;
+    const res = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update",
+        eventId,
+        eventData: {
+          ...target,
+          shots_per_guest: newShots,
+        },
+      }),
+    });
+    if (res.ok) {
+      await refreshEvents(eventId);
+    }
+  };
+
+  // Update event template_mode setting
+  const handleUpdateEventMode = async (eventId: string, mode: "OPERATOR" | "GUEST") => {
+    const target = events.find((e) => e.id === eventId);
+    if (!target) return;
+    const res = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update",
+        eventId,
+        eventData: {
+          ...target,
+          template_mode: mode,
+        },
+      }),
+    });
+    if (res.ok) {
+      await refreshEvents(eventId);
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-[580px] lg:h-[calc(100vh-10rem)]">
       {/* TABS ROW */}
@@ -292,7 +334,12 @@ export default function EventSetupView({
               onDeleteEvent={handleDeleteEvent}
             />
           ) : (
-            <TemplatesTab selectedEvent={selectedEvent} />
+            <TemplatesTab
+              selectedEvent={selectedEvent}
+              allEvents={events}
+              onUpdateEventShots={handleUpdateEventShots}
+              onUpdateEventMode={(m) => handleUpdateEventMode(selectedEvent.id, m)}
+            />
           )}
         </div>
       </div>

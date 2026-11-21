@@ -74,14 +74,20 @@ export interface IDataStore {
   // Shoot session operations
   getOrCreateShootSession(
     queueId: string,
-    captureType?: string
+    captureType?: string,
+    templateId?: string | null
   ): Promise<{
     id: string;
     queue_id: string;
     capture_type: string;
+    template_id?: string | null;
     started_at: string;
     ended_at: string | null;
   }>;
+  updateShootSessionTemplate(
+    sessionId: string,
+    templateId: string | null
+  ): Promise<boolean>;
 
   // Print operations
   countPrints(guestId: string): Promise<number>;
@@ -901,11 +907,13 @@ class SupabaseDataStore implements IDataStore {
 
   async getOrCreateShootSession(
     queueId: string,
-    captureType: string = "PHOTO"
+    captureType: string = "PHOTO",
+    templateId?: string | null
   ): Promise<{
     id: string;
     queue_id: string;
     capture_type: string;
+    template_id?: string | null;
     started_at: string;
     ended_at: string | null;
   }> {
@@ -919,7 +927,15 @@ class SupabaseDataStore implements IDataStore {
       .limit(1);
 
     if (!findErr && existing && existing.length > 0) {
-      return existing[0];
+      const session = existing[0];
+      if (templateId !== undefined && session.template_id !== templateId) {
+        await supabaseServer
+          .from("shoot_sessions")
+          .update({ template_id: templateId })
+          .eq("id", session.id);
+        session.template_id = templateId;
+      }
+      return session;
     }
 
     const nowIso = new Date().toISOString();
@@ -928,6 +944,7 @@ class SupabaseDataStore implements IDataStore {
       .insert({
         queue_id: queueId,
         capture_type: captureType,
+        template_id: templateId || null,
         started_at: nowIso,
       })
       .select()
@@ -939,6 +956,21 @@ class SupabaseDataStore implements IDataStore {
     }
 
     return created;
+  }
+
+  async updateShootSessionTemplate(
+    sessionId: string,
+    templateId: string | null
+  ): Promise<boolean> {
+    try {
+      const { error } = await supabaseServer
+        .from("shoot_sessions")
+        .update({ template_id: templateId })
+        .eq("id", sessionId);
+      return !error;
+    } catch {
+      return false;
+    }
   }
 
   // --- Print Operations ---

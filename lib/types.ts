@@ -30,6 +30,7 @@ export interface Event {
   print_layout: PrintLayout; // SINGLE | STRIP | GRID
   max_prints_per_guest: number; // 1 to 5, default 1
   include_gif?: boolean; // Optional animated GIF slideshow of kept shots
+  template_mode?: "OPERATOR" | "GUEST"; // Operator picks default only vs guests choose
   status: EventStatus;
   created_at?: string;
 }
@@ -93,6 +94,16 @@ export interface PhotoTemplate {
   frame_url?: string | null; // short-lived signed URL
   background_url?: string | null; // short-lived signed URL
   is_active: boolean;
+  is_default?: boolean;
   created_at?: string;
+}
+
+export interface ShootSession {
+  id: string;
+  queue_id: string;
+  capture_type: string;
+  template_id?: string | null;
+  started_at: string;
+  ended_at: string | null;
 }
 
