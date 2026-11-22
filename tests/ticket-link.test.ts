@@ -3,9 +3,27 @@ import assert from "node:assert";
 import { GET as getTicketRoute } from "../app/api/admin/queue/ticket/route";
 import { GET as getQueueRoute } from "../app/api/queue/route";
 import { db } from "../lib/db";
+import { createSessionToken, SESSION_COOKIE_NAME } from "../lib/auth";
+
+const TEST_SECRET = "test-session-secret-at-least-32-chars-long!";
+
+async function createAuthHeaders(): Promise<HeadersInit> {
+  process.env.SESSION_SECRET = TEST_SECRET;
+  const token = await createSessionToken(TEST_SECRET);
+  return {
+    cookie: `${SESSION_COOKIE_NAME}=${token}`,
+  };
+}
+
+test("GET /api/admin/queue/ticket rejects unauthenticated requests with 401", async () => {
+  const req = new Request("http://localhost:3000/api/admin/queue/ticket?queueId=test-123");
+  const res = await getTicketRoute(req);
+  assert.strictEqual(res.status, 401);
+});
 
 test("GET /api/admin/queue/ticket rejects missing queueId with 400", async () => {
-  const req = new Request("http://localhost:3000/api/admin/queue/ticket");
+  const headers = await createAuthHeaders();
+  const req = new Request("http://localhost:3000/api/admin/queue/ticket", { headers });
   const res = await getTicketRoute(req);
   assert.strictEqual(res.status, 400);
 
@@ -19,7 +37,8 @@ test("GET /api/admin/queue/ticket returns 404 when queueId not found", async () 
   db.getGuestTokenByQueueId = async () => null;
 
   try {
-    const req = new Request("http://localhost:3000/api/admin/queue/ticket?queueId=non-existent-id");
+    const headers = await createAuthHeaders();
+    const req = new Request("http://localhost:3000/api/admin/queue/ticket?queueId=non-existent-id", { headers });
     const res = await getTicketRoute(req);
     assert.strictEqual(res.status, 404);
 
@@ -39,7 +58,8 @@ test("GET /api/admin/queue/ticket returns formatted ticketUrl with guest_token",
   };
 
   try {
-    const req = new Request("http://localhost:3000/api/admin/queue/ticket?queueId=queue_valid_123");
+    const headers = await createAuthHeaders();
+    const req = new Request("http://localhost:3000/api/admin/queue/ticket?queueId=queue_valid_123", { headers });
     const res = await getTicketRoute(req);
     assert.strictEqual(res.status, 200);
 

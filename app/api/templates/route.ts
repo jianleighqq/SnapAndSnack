@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
+import { requireOperatorSession } from "@/lib/auth-server";
+import { validateUploadMagicBytes } from "@/lib/image-convert";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
  * Creates short-lived signed URLs (1 hour) for private template storage paths.
@@ -100,6 +102,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const isAuthorized = await requireOperatorSession(request);
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: "Unauthorized. Operator session required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const contentType = request.headers.get("content-type") || "";
 
@@ -471,9 +481,19 @@ export async function POST(request: Request) {
 
       // Upload Frame
       if (frameFile && frameFile.size > 0) {
+        if (frameFile.size > MAX_BYTES) {
+          return NextResponse.json({ error: "Frame file exceeds 10 MB limit" }, { status: 400 });
+        }
+        const frameBuffer = Buffer.from(await frameFile.arrayBuffer());
+        if (!validateUploadMagicBytes(frameBuffer, ["png", "jpeg", "webp"])) {
+          return NextResponse.json(
+            { error: "Invalid frame image format. Authentic PNG, JPEG, or WEBP required." },
+            { status: 400 }
+          );
+        }
+
         const frameExt = frameFile.type === "image/png" ? "png" : "jpg";
         framePath = `${eventId}/${templateId}/frame.${frameExt}`;
-        const frameBuffer = Buffer.from(await frameFile.arrayBuffer());
 
         const { error: fErr } = await supabaseServer.storage
           .from("templates")
@@ -484,15 +504,25 @@ export async function POST(request: Request) {
 
         if (fErr) {
           console.error("[Templates API] Frame upload failed:", fErr);
-          return NextResponse.json({ error: "Failed to upload frame: " + fErr.message }, { status: 500 });
+          return NextResponse.json({ error: "Failed to upload frame file." }, { status: 500 });
         }
       }
 
       // Upload Background
       if (backgroundFile && backgroundFile.size > 0) {
+        if (backgroundFile.size > MAX_BYTES) {
+          return NextResponse.json({ error: "Background file exceeds 10 MB limit" }, { status: 400 });
+        }
+        const bgBuffer = Buffer.from(await backgroundFile.arrayBuffer());
+        if (!validateUploadMagicBytes(bgBuffer, ["png", "jpeg", "webp"])) {
+          return NextResponse.json(
+            { error: "Invalid background image format. Authentic PNG, JPEG, or WEBP required." },
+            { status: 400 }
+          );
+        }
+
         const bgExt = backgroundFile.type === "image/png" ? "png" : "jpg";
         backgroundPath = `${eventId}/${templateId}/background.${bgExt}`;
-        const bgBuffer = Buffer.from(await backgroundFile.arrayBuffer());
 
         const { error: bgErr } = await supabaseServer.storage
           .from("templates")
@@ -503,7 +533,7 @@ export async function POST(request: Request) {
 
         if (bgErr) {
           console.error("[Templates API] Background upload failed:", bgErr);
-          return NextResponse.json({ error: "Failed to upload background: " + bgErr.message }, { status: 500 });
+          return NextResponse.json({ error: "Failed to upload background file." }, { status: 500 });
         }
       }
 

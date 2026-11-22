@@ -115,6 +115,18 @@ ${ticketUrl}
   return { subject, text, html };
 }
 
+function maskEmail(email: string): string {
+  if (!email || typeof email !== "string") return "***";
+  const parts = email.split("@");
+  if (parts.length !== 2) return "***";
+  const [user, domain] = parts;
+  const maskedUser =
+    user.length > 2
+      ? `${user[0]}***${user[user.length - 1]}`
+      : `${user[0] || "*"}*`;
+  return `${maskedUser}@${domain}`;
+}
+
 /**
  * Dispatches a registration confirmation email.
  * Priority:
@@ -154,7 +166,7 @@ export async function sendRegistrationEmail(options: SendEmailOptions): Promise<
         html: content.html,
       });
 
-      console.log(`Confirmation email sent via SMTP to ${to} (messageId: ${info.messageId})`);
+      console.log(`Confirmation email sent via SMTP to ${maskEmail(to)} (messageId: ${info.messageId})`);
       return { success: true, provider: "smtp", messageId: info.messageId };
     } catch (smtpErr: any) {
       console.error("SMTP delivery failed:", smtpErr?.message || smtpErr);
@@ -182,12 +194,12 @@ export async function sendRegistrationEmail(options: SendEmailOptions): Promise<
 
       if (!resendRes.ok) {
         const errText = await resendRes.text();
-        console.error("Resend delivery failed with status:", resendRes.status, errText);
+        console.error("Resend delivery failed with status:", resendRes.status);
         return { success: false, provider: "resend", error: errText };
       }
 
       const resendData = await resendRes.json();
-      console.log(`Confirmation email sent via Resend to ${to} (id: ${resendData.id})`);
+      console.log(`Confirmation email sent via Resend to ${maskEmail(to)} (id: ${resendData.id})`);
       return { success: true, provider: "resend", messageId: resendData.id };
     } catch (resendErr: any) {
       console.error("Resend delivery error:", resendErr?.message || resendErr);

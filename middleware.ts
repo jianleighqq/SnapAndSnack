@@ -47,6 +47,7 @@ export async function middleware(request: NextRequest) {
       pathname.startsWith("/api/print") ||
       pathname.startsWith("/api/hardware") ||
       pathname.startsWith("/api/templates") ||
+      pathname.startsWith("/api/poses") ||
       pathname.startsWith("/api/media");
 
     // If path is neither a protected page nor a protected API, let it proceed

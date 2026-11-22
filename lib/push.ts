@@ -1,3 +1,4 @@
+import "server-only";
 import * as webpush from "web-push";
 import { supabaseServer } from "@/lib/supabase-server";
 

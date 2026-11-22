@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import type { Pose } from "@/lib/types";
 import { SEEDED_DEFAULT_POSES, seedPosesIfEmpty, attachSignedPoseUrl } from "@/lib/poses";
+import { requireOperatorSession } from "@/lib/auth-server";
+import { validateUploadMagicBytes } from "@/lib/image-convert";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB limit
 
 /**
  * GET /api/poses
@@ -44,6 +46,14 @@ export async function GET() {
  * Handles creation, edits, reordering, active toggle, and deletion of poses.
  */
 export async function POST(request: Request) {
+  const isAuthorized = await requireOperatorSession(request);
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: "Unauthorized. Operator session required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const contentType = request.headers.get("content-type") || "";
 
@@ -193,6 +203,12 @@ export async function POST(request: Request) {
 
         if (guideFile && guideFile.size > 0) {
           const fileBuffer = Buffer.from(await guideFile.arrayBuffer());
+          if (!validateUploadMagicBytes(fileBuffer, ["jpeg", "png", "webp"])) {
+            return NextResponse.json(
+              { error: "Invalid image format. Only JPEG, PNG, or WEBP are permitted." },
+              { status: 400 }
+            );
+          }
           const storagePath = `poses/${poseIdParam}.jpg`;
 
           const { error: uploadErr } = await supabaseServer.storage
@@ -203,7 +219,11 @@ export async function POST(request: Request) {
             });
 
           if (uploadErr) {
-            return NextResponse.json({ error: uploadErr.message }, { status: 500 });
+            console.error("[Poses API] Image edit upload failed:", uploadErr);
+            return NextResponse.json(
+              { error: "Failed to upload image file." },
+              { status: 500 }
+            );
           }
           newImagePath = storagePath;
         }
@@ -238,6 +258,12 @@ export async function POST(request: Request) {
       // 1. Upload guide image if supplied
       if (guideFile && guideFile.size > 0) {
         const fileBuffer = Buffer.from(await guideFile.arrayBuffer());
+        if (!validateUploadMagicBytes(fileBuffer, ["jpeg", "png", "webp"])) {
+          return NextResponse.json(
+            { error: "Invalid image format. Only authentic JPG, PNG, or WEBP are permitted." },
+            { status: 400 }
+          );
+        }
         storagePath = `poses/${newPoseId}.jpg`;
 
         const { error: uploadErr } = await supabaseServer.storage
@@ -250,7 +276,7 @@ export async function POST(request: Request) {
         if (uploadErr) {
           console.error("[Poses API] Image upload failed:", uploadErr);
           return NextResponse.json(
-            { error: `Failed to upload guide picture: ${uploadErr.message}` },
+            { error: "Failed to upload guide picture." },
             { status: 500 }
           );
         }

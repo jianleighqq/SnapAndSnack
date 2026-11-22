@@ -4,13 +4,43 @@ import { supabaseServer } from "@/lib/supabase-server";
 import { refreshStatuses } from "@/lib/queue";
 import { sendRegistrationEmail } from "@/lib/email";
 import { extractFirstName } from "@/lib/booth";
+import { checkIntakeRateLimit, getClientIp } from "@/lib/rate-limit";
+import { intakePayloadSchema } from "@/lib/validations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Maximum payload size for intake webhook: 64 KB
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+
 export async function POST(request: Request) {
+  // 1. Rate limiting (max 30 requests per minute per client IP)
+  const clientIp = getClientIp(request);
+  const rateLimit = checkIntakeRateLimit(clientIp);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
+    // 2. Cap incoming request body size
+    const contentLength = parseInt(request.headers.get("content-length") || "0", 10);
+    if (contentLength > MAX_PAYLOAD_BYTES) {
+      return NextResponse.json(
+        { error: "Payload too large. Maximum 64 KB allowed." },
+        { status: 413, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     const rawBody = await request.text();
+    if (rawBody.length > MAX_PAYLOAD_BYTES) {
+      return NextResponse.json(
+        { error: "Payload too large. Maximum 64 KB allowed." },
+        { status: 413, headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     const timestampHeader = request.headers.get("x-timestamp");
     const signatureHeader = request.headers.get("x-signature");
@@ -20,15 +50,15 @@ export async function POST(request: Request) {
       console.error("INTAKE_WEBHOOK_SECRET is not configured on server.");
       return NextResponse.json(
         { error: "Webhook secret not configured on server" },
-        { status: 500 }
+        { status: 500, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    // 1. Signature Verification & Replay Protection (5-minute window)
+    // 3. Signature Verification & Replay Protection (5-minute window)
     if (!timestampHeader || !signatureHeader) {
       return NextResponse.json(
         { error: "Missing authentication headers" },
-        { status: 401 }
+        { status: 401, headers: { "Cache-Control": "no-store" } }
       );
     }
 
@@ -38,7 +68,7 @@ export async function POST(request: Request) {
     if (isNaN(timestamp) || Math.abs(nowSeconds - timestamp) > 300) {
       return NextResponse.json(
         { error: "Timestamp expired or invalid" },
-        { status: 401 }
+        { status: 401, headers: { "Cache-Control": "no-store" } }
       );
     }
 
@@ -57,41 +87,32 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json(
         { error: "Invalid signature" },
-        { status: 401 }
+        { status: 401, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    // 2. Body Validation (never log the secret)
-    let body: any;
+    // 4. Body JSON Validation via Zod
+    let rawJson: any;
     try {
-      body = JSON.parse(rawBody);
+      rawJson = JSON.parse(rawBody);
     } catch {
       return NextResponse.json(
         { error: "Malformed JSON payload" },
-        { status: 400 }
+        { status: 400, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    const { event_code, full_name, email } = body || {};
-
-    const trimmedName = typeof full_name === "string" ? full_name.trim() : "";
-    if (!trimmedName || trimmedName.length < 1 || trimmedName.length > 100) {
+    const parsed = intakePayloadSchema.safeParse(rawJson);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "full_name must be between 1 and 100 characters" },
-        { status: 400 }
+        { error: parsed.error.issues[0]?.message || "Invalid payload" },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(normalizedEmail)) {
-      return NextResponse.json(
-        { error: "A valid email address is required" },
-        { status: 400 }
-      );
-    }
+    const { full_name: trimmedName, email: normalizedEmail, event_code } = parsed.data;
 
-    // 3. Resolve target event: either via explicit event_code or via the currently ACTIVE event
+    // 5. Resolve target event: either via explicit event_code or via the currently ACTIVE event
     let event: any = null;
     const cleanEventCode = typeof event_code === "string" ? event_code.trim().toUpperCase() : "";
 
@@ -106,7 +127,7 @@ export async function POST(request: Request) {
       if (eventErr || !data) {
         return NextResponse.json(
           { error: "Event not found" },
-          { status: 404 }
+          { status: 404, headers: { "Cache-Control": "no-store" } }
         );
       }
       event = data;
@@ -121,7 +142,7 @@ export async function POST(request: Request) {
       if (activeErr || !activeEvent) {
         return NextResponse.json(
           { error: "Registration is not open" },
-          { status: 409 }
+          { status: 409, headers: { "Cache-Control": "no-store" } }
         );
       }
       event = activeEvent;
@@ -130,11 +151,11 @@ export async function POST(request: Request) {
     if (event.status === "CLOSED") {
       return NextResponse.json(
         { error: "Registration closed" },
-        { status: 409 }
+        { status: 409, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    // 4. Idempotency Check: if guest already exists with this email for this event
+    // 6. Idempotency Check: if guest already exists with this email for this event
     const { data: existingGuest } = await supabaseServer
       .from("guests")
       .select("*")
@@ -154,11 +175,11 @@ export async function POST(request: Request) {
           queue_number: existingQueue?.queue_number ?? null,
           guest_token: existingGuest.guest_token,
         },
-        { status: 200 }
+        { status: 200, headers: { "Cache-Control": "no-store" } }
       );
     }
 
-    // 5. Insert into guests (database generates uuid id and guest_token)
+    // 7. Insert into guests (database generates uuid id and guest_token)
     const { data: newGuest, error: guestErr } = await supabaseServer
       .from("guests")
       .insert({
@@ -170,10 +191,10 @@ export async function POST(request: Request) {
       .single();
 
     if (guestErr || !newGuest) {
-      console.error("Supabase insert guest error:", guestErr);
+      console.error("Supabase insert guest error:", guestErr?.message || guestErr);
       return NextResponse.json(
         { error: "Failed to create guest record" },
-        { status: 500 }
+        { status: 500, headers: { "Cache-Control": "no-store" } }
       );
     }
 
@@ -223,10 +244,10 @@ export async function POST(request: Request) {
         // Unique constraint violation on (event_id, queue_number), retry once
         continue;
       } else {
-        console.error("Supabase insert queue entry error:", entryErr);
+        console.error("Supabase insert queue entry error:", entryErr?.message || entryErr);
         return NextResponse.json(
           { error: "Failed to create queue entry" },
-          { status: 500 }
+          { status: 500, headers: { "Cache-Control": "no-store" } }
         );
       }
     }
@@ -241,7 +262,6 @@ export async function POST(request: Request) {
 
       if (allEntries && allEntries.length > 0) {
         const refreshed = refreshStatuses(allEntries as any);
-        const nowIso = new Date().toISOString();
         for (const item of refreshed) {
           const original = allEntries.find((e) => e.id === item.id);
           if (original && original.status !== item.status) {
@@ -256,7 +276,7 @@ export async function POST(request: Request) {
       console.warn("refreshStatuses error during intake:", refreshErr);
     }
 
-    // 6. Send notification email via Gmail SMTP (or Resend fallback)
+    // 8. Send notification email via Gmail SMTP (or Resend fallback)
     try {
       const firstName = extractFirstName(newGuest.full_name);
       await sendRegistrationEmail({
@@ -271,19 +291,19 @@ export async function POST(request: Request) {
       console.error("Intake email dispatch error:", emailErr);
     }
 
-    // 7. Response
+    // 9. Response
     return NextResponse.json(
       {
         queue_number: createdEntry.queue_number,
         guest_token: newGuest.guest_token,
       },
-      { status: 200 }
+      { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error: any) {
-    console.error("Intake route error:", error);
+    console.error("Intake route error:", error?.message || error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

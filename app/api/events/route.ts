@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { validateEventInput } from "@/lib/events";
+import { requireOperatorSession } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -11,17 +12,29 @@ export async function GET() {
       db.getEvents(),
       db.getActiveEvent(),
     ]);
-    return NextResponse.json({ events, activeEvent });
+    return NextResponse.json(
+      { events, activeEvent },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     console.error("Events API GET error:", error);
     return NextResponse.json(
       { error: "Failed to fetch events" },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }
 
 export async function POST(request: Request) {
+  // Enforce server-side operator authorization
+  const isAuthorized = await requireOperatorSession(request);
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: "Unauthorized. Operator session required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const body = await request.json();
     const { action, eventId, eventData } = body;
@@ -99,8 +112,8 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error("Events API POST Error:", error);
     return NextResponse.json(
-      { error: "Failed to process event action", details: error?.message || String(error) },
-      { status: 500 }
+      { error: "Failed to process event action" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

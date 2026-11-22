@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sendGuestPush, logGuestAlert } from "@/lib/push";
+import { requireOperatorSession } from "@/lib/auth-server";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { queueActionSchema } from "@/lib/validations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +28,8 @@ export async function GET() {
         },
       }
     );
-  } catch (error) {
-    console.error("GET /api/queue error:", error);
+  } catch (error: any) {
+    console.error("GET /api/queue error:", error?.message || error);
     return NextResponse.json(
       { error: "Failed to fetch queue data" },
       {
@@ -40,9 +43,42 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Rate limiting: 60 requests per minute per IP
+  const clientIp = getClientIp(request);
+  const rateLimit = checkRateLimit(`queue_post:${clientIp}`, 60, 60_000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60", "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
-    const body = await request.json();
-    const { action, queueId, guestToken, fullName, email } = body;
+    const rawBody = await request.json().catch(() => ({}));
+    const parseRes = queueActionSchema.safeParse(rawBody);
+
+    if (!parseRes.success) {
+      return NextResponse.json(
+        { error: parseRes.error.issues[0]?.message || "Invalid queue request" },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    const { action, queueId, guestToken, fullName, email } = parseRes.data;
+
+    // Authorization:
+    // Only guest-self-cancellation with a valid guestToken is permitted without operator session.
+    // All other operations (addGuest, start, remind, finish, callNext, or operator-driven cancel by queueId)
+    // require a verified operator session.
+    const isOperator = await requireOperatorSession(request);
+    const isGuestCancel = action === "cancel" && Boolean(guestToken && guestToken.trim());
+
+    if (!isOperator && !isGuestCancel) {
+      return NextResponse.json(
+        { error: "Unauthorized: Operator session required" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     let targetQueueId = queueId;
 
@@ -52,27 +88,20 @@ export async function POST(request: Request) {
       if (!guestData || !guestData.queueEntry) {
         return NextResponse.json(
           { error: "Guest not found or has no active queue entry" },
-          { status: 404 }
+          { status: 404, headers: { "Cache-Control": "no-store" } }
         );
       }
       targetQueueId = guestData.queueEntry.id;
-    }
-
-    if (!action) {
-      return NextResponse.json(
-        { error: "Action is required" },
-        { status: 400 }
-      );
     }
 
     let notified = false;
 
     switch (action) {
       case "addGuest": {
-        if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
+        if (!fullName || !fullName.trim()) {
           return NextResponse.json(
             { error: "fullName is required" },
-            { status: 400 }
+            { status: 400, headers: { "Cache-Control": "no-store" } }
           );
         }
         await db.addGuest({
@@ -83,12 +112,12 @@ export async function POST(request: Request) {
       }
 
       case "start":
-        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
+        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
         await db.startShoot(targetQueueId);
         break;
 
       case "remind": {
-        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
+        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
         const remindRes = await db.remindGuest(targetQueueId);
         if (remindRes.reminded && remindRes.reminded.guest) {
           const guest = remindRes.reminded.guest;
@@ -106,12 +135,12 @@ export async function POST(request: Request) {
       }
 
       case "finish":
-        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
+        if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
         await db.finishShoot(targetQueueId);
         break;
 
       case "cancel":
-        if (!targetQueueId) return NextResponse.json({ error: "queueId or guestToken required" }, { status: 400 });
+        if (!targetQueueId) return NextResponse.json({ error: "queueId or guestToken required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
         await db.cancelBooking(targetQueueId);
         break;
 
@@ -135,7 +164,7 @@ export async function POST(request: Request) {
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },
-          { status: 400 }
+          { status: 400, headers: { "Cache-Control": "no-store" } }
         );
     }
 
@@ -163,12 +192,11 @@ export async function POST(request: Request) {
       }
     );
   } catch (error: any) {
-    console.error("Queue API Error:", error);
+    console.error("Queue API Error:", error?.message || error);
     const statusCode = error.statusCode || 500;
     return NextResponse.json(
       {
         error: error.message || "Failed to process queue action",
-        details: error?.message || String(error),
       },
       {
         status: statusCode,

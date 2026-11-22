@@ -70,10 +70,10 @@ export function checkRateLimit(
 }
 
 /**
- * Failed login attempts tracking (Max 5 wrong attempts per IP per 10 minutes)
+ * Failed login attempts tracking (Max 5 wrong attempts per IP per 15 minutes)
  */
 const loginFailuresMap = new Map<string, RateLimitRecord>();
-const LOGIN_LOCKOUT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_LOGIN_ATTEMPTS = 5;
 
 /**
@@ -179,5 +179,16 @@ export function checkBoothRateLimit(ip: string): {
   resetAt: number;
 } {
   return checkRateLimit(`booth:${ip}`, 120, 60_000);
+}
+
+/**
+ * Rate limit for registration intake: 30 requests per minute per IP.
+ */
+export function checkIntakeRateLimit(ip: string): {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+} {
+  return checkRateLimit(`intake:${ip}`, 30, 60_000);
 }
 

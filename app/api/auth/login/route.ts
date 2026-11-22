@@ -4,6 +4,7 @@ import {
   createSessionToken,
   SESSION_COOKIE_NAME,
   SESSION_DURATION_SECONDS,
+  verifyPin,
 } from "@/lib/auth";
 import {
   getClientIp,
@@ -56,32 +57,33 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Constant-time PIN verification using crypto.timingSafeEqual
-    const inputBuffer = Buffer.from(pin.trim());
-    const expectedBuffer = Buffer.from(operatorPin.trim());
-    const isValid =
-      inputBuffer.length === expectedBuffer.length &&
-      crypto.timingSafeEqual(inputBuffer, expectedBuffer);
+    // 2. Constant-time PIN verification using timingSafeEqual
+    const isValid = verifyPin(pin, operatorPin);
 
     if (!isValid) {
       const failureStatus = recordLoginFailure(clientIp);
-      console.warn(`[Auth API] Failed PIN attempt from IP ${clientIp}. Remaining: ${failureStatus.remaining}`);
+      console.warn(`[Auth API] Failed PIN attempt from IP ${clientIp}.`);
 
       if (!failureStatus.allowed) {
         return NextResponse.json(
           {
-            error: "Too many failed attempts. Please try again in 10 minutes.",
+            error: "Too many failed attempts. Please try again in 15 minutes.",
           },
-          { status: 429 }
+          {
+            status: 429,
+            headers: {
+              "Retry-After": "900",
+              "Cache-Control": "no-store",
+            },
+          }
         );
       }
 
       return NextResponse.json(
         {
-          error: "Incorrect PIN. Please try again.",
-          remainingAttempts: failureStatus.remaining,
+          error: "Invalid operator credentials.",
         },
-        { status: 401 }
+        { status: 401, headers: { "Cache-Control": "no-store" } }
       );
     }
 

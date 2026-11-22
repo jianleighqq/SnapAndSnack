@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { validateImageMagicBytes } from "@/lib/image-convert";
+import { requireOperatorSession } from "@/lib/auth-server";
+import { getCurrentBoothGuest } from "@/lib/booth";
+import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,7 +19,7 @@ function parseDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | n
   const commaIndex = dataUrl.indexOf(",");
   if (commaIndex === -1) return null;
 
-  const header = dataUrl.slice(5, commaIndex); // e.g. "image/jpeg;base64" or "image/svg+xml;charset=utf-8"
+  const header = dataUrl.slice(5, commaIndex);
   const payload = dataUrl.slice(commaIndex + 1);
 
   const parts = header.split(";");
@@ -24,16 +27,40 @@ function parseDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | n
   const isBase64 = parts.includes("base64");
 
   let buffer: Buffer;
-  if (isBase64) {
-    buffer = Buffer.from(payload, "base64");
-  } else {
-    buffer = Buffer.from(decodeURIComponent(payload), "utf-8");
+  try {
+    if (isBase64) {
+      buffer = Buffer.from(payload, "base64");
+    } else {
+      buffer = Buffer.from(decodeURIComponent(payload), "utf-8");
+    }
+  } catch {
+    return null;
   }
 
   return { mimeType, buffer };
 }
 
 export async function POST(request: Request) {
+  // 1. Rate limiting
+  const ip = getClientIp(request);
+  const rateLimit = checkBoothRateLimit(ip);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment." },
+      { status: 429, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  // 2. Authorization: operator session or active booth guest
+  const isOperator = await requireOperatorSession(request);
+  const boothContext = !isOperator ? await getCurrentBoothGuest() : null;
+  if (!isOperator && !boothContext) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const body = await request.json();
     const {

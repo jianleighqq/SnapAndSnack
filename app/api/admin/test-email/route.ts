@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { sendTestEmail } from "@/lib/email";
+import { requireOperatorSession } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request) {
+  const isAuthorized = await requireOperatorSession(request);
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: "Unauthorized. Operator session required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const body = await request.json().catch(() => ({}));
     const { email, eventName } = body || {};

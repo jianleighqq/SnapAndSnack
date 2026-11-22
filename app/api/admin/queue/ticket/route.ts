@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { checkGuestHasPush } from "@/lib/push";
+import { requireOperatorSession } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request) {
+  const isAuthorized = await requireOperatorSession(request);
+  if (!isAuthorized) {
+    return NextResponse.json(
+      { error: "Unauthorized. Operator session required." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   try {
     const url = new URL(request.url);
     const queueId = url.searchParams.get("queueId");

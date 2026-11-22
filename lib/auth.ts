@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 export const SESSION_COOKIE_NAME = "snap_session";
 
 // Configurable session duration in hours (SESSION_HOURS env var, default 12)
@@ -34,23 +36,14 @@ export interface SessionPayload {
 }
 
 /**
- * Constant-time comparison between input PIN and expected operator PIN.
- * Edge and Node compatible constant-time check.
+ * Timing-safe comparison between input PIN and expected operator PIN using crypto.timingSafeEqual.
+ * Hashes inputs with SHA-256 first to guarantee constant length and eliminate length side-channels.
  */
 export function verifyPin(inputPin: string, expectedPin: string | undefined): boolean {
   if (!inputPin || !expectedPin) return false;
-
-  const a = inputPin.trim();
-  const b = expectedPin.trim();
-
-  if (a.length !== b.length) return false;
-
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-
-  return mismatch === 0;
+  const hashA = crypto.createHash("sha256").update(inputPin.trim()).digest();
+  const hashB = crypto.createHash("sha256").update(expectedPin.trim()).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
 }
 
 /**
