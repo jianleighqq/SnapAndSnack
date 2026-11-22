@@ -19,6 +19,10 @@ function createMockEvents(): Event[] {
       start_time: "2026-11-01T18:00:00Z",
       end_time: "2026-11-01T22:00:00Z",
       avg_shoot_minutes: 5,
+      shots_per_guest: 3,
+      max_retakes: 2,
+      print_layout: "STRIP",
+      max_prints_per_guest: 1,
       status: "ACTIVE",
     },
     {
@@ -29,6 +33,10 @@ function createMockEvents(): Event[] {
       start_time: "2026-11-10T19:00:00Z",
       end_time: "2026-11-10T23:00:00Z",
       avg_shoot_minutes: 5,
+      shots_per_guest: 3,
+      max_retakes: 2,
+      print_layout: "STRIP",
+      max_prints_per_guest: 1,
       status: "SCHEDULED",
     },
     {
@@ -39,6 +47,10 @@ function createMockEvents(): Event[] {
       start_time: "2026-10-01T14:00:00Z",
       end_time: "2026-10-01T18:00:00Z",
       avg_shoot_minutes: 4,
+      shots_per_guest: 3,
+      max_retakes: 2,
+      print_layout: "STRIP",
+      max_prints_per_guest: 1,
       status: "CLOSED",
     },
   ];

@@ -58,7 +58,7 @@ test("GET /api/queue sanitizes guest_token to empty string for all entries", asy
     event: {
       id: "evt_1",
       name: "Test Event",
-      event_type: "WEDDING",
+      event_type: "Wedding" as const,
       event_code: "TESTEVT",
       start_time: "2026-11-14T10:00:00Z",
       end_time: "2026-11-14T20:00:00Z",
@@ -66,6 +66,7 @@ test("GET /api/queue sanitizes guest_token to empty string for all entries", asy
       shots_per_guest: 3,
       max_retakes: 2,
       print_layout: "STRIP",
+      max_prints_per_guest: 1,
       status: "ACTIVE",
     },
     queue: [

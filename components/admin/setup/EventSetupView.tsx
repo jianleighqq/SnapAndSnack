@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Sparkles, SlidersHorizontal, Image, Camera } from "lucide-react";
+import { SlidersHorizontal, Image, Camera } from "lucide-react";
 import type { Event } from "@/lib/types";
 import EventsList from "./EventsList";
 import HardwareStatusPanel from "./HardwareStatusPanel";
@@ -11,7 +11,6 @@ import EventModal from "./EventModal";
 import ConfirmModal from "./ConfirmModal";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
-import { StatusPill } from "@/components/ui/StatusPill";
 
 interface EventSetupViewProps {
   initialEvents: Event[];
@@ -272,43 +271,36 @@ export default function EventSetupView({
   return (
     <div className="flex flex-col min-h-[580px] lg:h-[calc(100vh-10rem)]">
       {/* TABS ROW */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Setup & Diagnostics Tab */}
-          <Pill
-            variant={currentTab === "setup" ? "primary" : "secondary"}
-            onClick={() => setCurrentTab("setup")}
-            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
-          >
-            <SlidersHorizontal className={`h-4 w-4 ${currentTab === "setup" ? "text-accent" : ""}`} />
-            <span>Setup &amp; Diagnostics</span>
-          </Pill>
+      <div className="flex flex-wrap items-center gap-2 pb-4">
+        {/* Setup & Diagnostics Tab */}
+        <Pill
+          variant={currentTab === "setup" ? "primary" : "secondary"}
+          onClick={() => setCurrentTab("setup")}
+          className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
+        >
+          <SlidersHorizontal className={`h-4 w-4 ${currentTab === "setup" ? "text-accent" : ""}`} />
+          <span>Setup &amp; Diagnostics</span>
+        </Pill>
 
-          {/* Templates Tab */}
-          <Pill
-            variant={currentTab === "templates" ? "primary" : "secondary"}
-            onClick={() => setCurrentTab("templates")}
-            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
-          >
-            <Image className={`h-4 w-4 ${currentTab === "templates" ? "text-accent" : ""}`} />
-            <span>Templates</span>
-          </Pill>
+        {/* Templates Tab */}
+        <Pill
+          variant={currentTab === "templates" ? "primary" : "secondary"}
+          onClick={() => setCurrentTab("templates")}
+          className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
+        >
+          <Image className={`h-4 w-4 ${currentTab === "templates" ? "text-accent" : ""}`} />
+          <span>Templates</span>
+        </Pill>
 
-          {/* Poses Tab */}
-          <Pill
-            variant={currentTab === "poses" ? "primary" : "secondary"}
-            onClick={() => setCurrentTab("poses")}
-            className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
-          >
-            <Camera className={`h-4 w-4 ${currentTab === "poses" ? "text-accent" : ""}`} />
-            <span>Poses</span>
-          </Pill>
-        </div>
-
-        {/* Mock Mode Tag */}
-        <StatusPill tone="warn" icon={Sparkles}>
-          Mock Mode
-        </StatusPill>
+        {/* Poses Tab */}
+        <Pill
+          variant={currentTab === "poses" ? "primary" : "secondary"}
+          onClick={() => setCurrentTab("poses")}
+          className="gap-2 cursor-pointer font-mono uppercase text-xs tracking-wider"
+        >
+          <Camera className={`h-4 w-4 ${currentTab === "poses" ? "text-accent" : ""}`} />
+          <span>Poses</span>
+        </Pill>
       </div>
 
       {/* TWO COLUMN WORKSPACE */}
