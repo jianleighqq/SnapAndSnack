@@ -355,6 +355,7 @@ class SupabaseDataStore implements IDataStore {
         scheduled_shoot_time: entry.scheduled_shoot_time,
         status: entry.status,
         created_at: entry.created_at,
+        has_alerts: false,
         guest: entry.guest || {
           id: entry.guest_id,
           event_id: entry.event_id,
@@ -363,6 +364,23 @@ class SupabaseDataStore implements IDataStore {
           guest_token: "",
         },
       }));
+
+      // Enrich queue items with push subscription status
+      const guestIds = queue.map((q) => q.guest.id).filter(Boolean);
+      if (guestIds.length > 0) {
+        try {
+          const { data: subs } = await supabaseServer
+            .from("push_subscriptions")
+            .select("guest_id")
+            .in("guest_id", guestIds);
+          if (subs && subs.length > 0) {
+            const subSet = new Set(subs.map((s: any) => s.guest_id));
+            for (const q of queue) {
+              q.has_alerts = subSet.has(q.guest.id);
+            }
+          }
+        } catch {}
+      }
 
       return {
         event: eventData as Event,
@@ -403,7 +421,7 @@ class SupabaseDataStore implements IDataStore {
 
       if (qErr || !entries || entries.length === 0) return [];
 
-      return entries.map((entry: any) => ({
+      const queue: QueueEntryWithGuest[] = entries.map((entry: any) => ({
         id: entry.id,
         event_id: entry.event_id,
         guest_id: entry.guest_id,
@@ -411,6 +429,7 @@ class SupabaseDataStore implements IDataStore {
         scheduled_shoot_time: entry.scheduled_shoot_time,
         status: entry.status,
         created_at: entry.created_at,
+        has_alerts: false,
         guest: entry.guest || {
           id: entry.guest_id,
           event_id: entry.event_id,
@@ -419,6 +438,24 @@ class SupabaseDataStore implements IDataStore {
           guest_token: "",
         },
       }));
+
+      const guestIds = queue.map((q) => q.guest.id).filter(Boolean);
+      if (guestIds.length > 0) {
+        try {
+          const { data: subs } = await supabaseServer
+            .from("push_subscriptions")
+            .select("guest_id")
+            .in("guest_id", guestIds);
+          if (subs && subs.length > 0) {
+            const subSet = new Set(subs.map((s: any) => s.guest_id));
+            for (const q of queue) {
+              q.has_alerts = subSet.has(q.guest.id);
+            }
+          }
+        } catch {}
+      }
+
+      return queue;
     } catch (err) {
       console.error("Supabase getQueue error:", err);
       return [];

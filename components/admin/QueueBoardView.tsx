@@ -155,22 +155,30 @@ export default function QueueBoardView({
         cache: "no-store",
       });
 
+      const resJson = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        const message = errJson.error || errJson.details || "Failed to perform action";
+        const message = resJson.error || resJson.details || "Failed to perform action";
         throw new Error(message);
       }
 
       // Authoritative refresh using the ONE shared fetch function
       await fetchQueueData(true);
 
-      const actionLabels = {
-        start: "started shooting",
-        remind: "reminder sent",
-        finish: "marked completed",
-        cancel: "booking cancelled",
-      };
-      showNotification(`Guest successfully ${actionLabels[action]}.`);
+      if (action === "remind") {
+        if (resJson.notified) {
+          showNotification("Reminder sent, phone notified");
+        } else {
+          showNotification("Reminder sent, no push (guest hasn't enabled alerts)");
+        }
+      } else {
+        const actionLabels = {
+          start: "started shooting",
+          finish: "marked completed",
+          cancel: "booking cancelled",
+        };
+        showNotification(`Guest successfully ${actionLabels[action]}.`);
+      }
     } catch (err: any) {
       console.error(err);
       showNotification(err?.message || "Error: Action could not be completed.");
@@ -207,7 +215,11 @@ export default function QueueBoardView({
       } else {
         // Authoritative refresh using the ONE shared fetch function
         await fetchQueueData(true);
-        showNotification("Advanced queue: Next guest called.");
+        if (data.notified) {
+          showNotification("Next guest called, phone notified");
+        } else {
+          showNotification("Advanced queue: Next guest called.");
+        }
       }
     } catch (err: any) {
       console.error(err);

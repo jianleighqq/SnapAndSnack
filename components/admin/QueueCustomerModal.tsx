@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import {
   Play,
   Bell,
+  BellOff,
   CheckCircle2,
   XCircle,
   ExternalLink,
@@ -46,6 +47,7 @@ export default function QueueCustomerModal({
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [ticketError, setTicketError] = useState<string | null>(null);
+  const [hasAlerts, setHasAlerts] = useState<boolean | null>(entry?.has_alerts ?? null);
 
   // Reset state whenever the active entry changes
   useEffect(() => {
@@ -56,7 +58,13 @@ export default function QueueCustomerModal({
     setTicketError(null);
     setShowCancelConfirm(false);
     setActionError(null);
-  }, [entry?.id]);
+    setHasAlerts(entry?.has_alerts ?? null);
+
+    if (entry?.id) {
+      // Proactively check ticket and alerts status
+      fetchTicketUrl();
+    }
+  }, [entry?.id, entry?.has_alerts]);
 
   if (!entry) return null;
 
@@ -75,6 +83,9 @@ export default function QueueCustomerModal({
       }
       const data = await res.json();
       setTicketUrl(data.ticketUrl);
+      if (typeof data.hasAlerts === "boolean") {
+        setHasAlerts(data.hasAlerts);
+      }
       return data.ticketUrl;
     } catch (err: any) {
       const msg = err?.message || "Could not fetch ticket link";
@@ -175,8 +186,17 @@ export default function QueueCustomerModal({
               #{entry.queue_number}
             </div>
             <div>
-              <div className="mb-1 flex items-center gap-2">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
                 <QueueStatusPill status={entry.status} />
+                {hasAlerts === true ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-emerald-600">
+                    <Bell className="h-3 w-3" /> Alerts on
+                  </span>
+                ) : hasAlerts === false ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 font-mono text-[10px] font-medium uppercase text-muted">
+                    <BellOff className="h-3 w-3" /> No alerts
+                  </span>
+                ) : null}
               </div>
               <h2 className="font-display text-2xl uppercase tracking-tight text-ink">
                 {entry.guest.full_name}

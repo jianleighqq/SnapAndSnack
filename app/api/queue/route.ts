@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { sendGuestPush, logGuestAlert } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -64,6 +65,8 @@ export async function POST(request: Request) {
       );
     }
 
+    let notified = false;
+
     switch (action) {
       case "addGuest": {
         if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
@@ -84,10 +87,23 @@ export async function POST(request: Request) {
         await db.startShoot(targetQueueId);
         break;
 
-      case "remind":
+      case "remind": {
         if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
-        await db.remindGuest(targetQueueId);
+        const remindRes = await db.remindGuest(targetQueueId);
+        if (remindRes.reminded && remindRes.reminded.guest) {
+          const guest = remindRes.reminded.guest;
+          const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+          const ticketUrl = `${baseUrl}/guest?token=${encodeURIComponent(guest.guest_token)}`;
+          const pushRes = await sendGuestPush(guest.id, {
+            title: "Get ready!",
+            body: "You're next at the photo booth. Please come to the booth now.",
+            url: ticketUrl,
+          });
+          notified = pushRes.sent > 0;
+          await logGuestAlert(remindRes.reminded.event_id, guest.id, "GET_READY");
+        }
         break;
+      }
 
       case "finish":
         if (!targetQueueId) return NextResponse.json({ error: "queueId required" }, { status: 400 });
@@ -99,9 +115,22 @@ export async function POST(request: Request) {
         await db.cancelBooking(targetQueueId);
         break;
 
-      case "callNext":
-        await db.callNext();
+      case "callNext": {
+        const callNextRes = await db.callNext();
+        if (callNextRes.promoted && callNextRes.promoted.guest) {
+          const guest = callNextRes.promoted.guest;
+          const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+          const ticketUrl = `${baseUrl}/guest?token=${encodeURIComponent(guest.guest_token)}`;
+          const pushRes = await sendGuestPush(guest.id, {
+            title: "It's your turn!",
+            body: "Please come to the photo booth.",
+            url: ticketUrl,
+          });
+          notified = pushRes.sent > 0;
+          await logGuestAlert(callNextRes.promoted.event_id, guest.id, "YOUR_TURN");
+        }
         break;
+      }
 
       default:
         return NextResponse.json(
@@ -111,11 +140,21 @@ export async function POST(request: Request) {
     }
 
     const { event, queue } = await db.getActiveEventWithQueue();
+    // Security: Never expose guest tokens in the general queue list response
+    const sanitizedQueue = (queue || []).map((entry) => ({
+      ...entry,
+      guest: {
+        ...entry.guest,
+        guest_token: "",
+      },
+    }));
+
     return NextResponse.json(
       {
         success: true,
         event,
-        queue,
+        queue: sanitizedQueue,
+        notified,
       },
       {
         headers: {

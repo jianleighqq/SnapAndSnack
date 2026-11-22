@@ -61,6 +61,7 @@ export interface QueueItem {
  */
 export interface QueueEntryWithGuest extends QueueItem {
   guest: Guest;
+  has_alerts?: boolean;
 }
 
 export interface ShootMedia {
@@ -117,4 +118,22 @@ export interface Pose {
   image_url?: string | null; // short-lived signed URL for client display
   created_at?: string;
 }
+
+export interface PushSubscriptionRecord {
+  id?: string;
+  guest_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  created_at?: string;
+}
+
+export interface AlertLog {
+  id?: string;
+  event_id: string;
+  guest_id: string;
+  alert_type: "GET_READY" | "YOUR_TURN";
+  sent_at?: string;
+}
+
 

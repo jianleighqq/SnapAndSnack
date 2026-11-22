@@ -10,10 +10,13 @@ import {
   XCircle,
   Camera,
   Bell,
+  BellOff,
+  Smartphone,
   RefreshCw,
   ImageIcon,
   WifiOff,
   ArrowRight,
+  Check,
 } from "lucide-react";
 import { Tile } from "@/components/ui/Tile";
 import { Pill, PillLink } from "@/components/ui/Pill";
@@ -32,6 +35,49 @@ export interface GuestStatusData {
   has_gallery: boolean;
 }
 
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function playSoftChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+  } catch {}
+}
+
+function triggerVibration() {
+  try {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate([300, 150, 300, 150, 600]);
+    }
+  } catch {}
+}
+
 export default function GuestStatusView() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
@@ -40,6 +86,17 @@ export default function GuestStatusView() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Push notifications & alert states
+  const [pushSupported, setPushSupported] = useState(false);
+  const [isIosSafariBrowser, setIsIosSafariBrowser] = useState(false);
+  const [pushStatus, setPushStatus] = useState<
+    "loading" | "prompt" | "subscribed" | "denied" | "subscribing"
+  >("loading");
+  const [isTestingPush, setIsTestingPush] = useState(false);
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [urgentBanner, setUrgentBanner] = useState<string | null>(null);
 
   // Cancellation modal state
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -50,6 +107,57 @@ export default function GuestStatusView() {
   const latestRequestIdRef = useRef<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef<boolean>(true);
+  const prevStatusRef = useRef<string | null>(null);
+
+  // Track initial user gesture to unlock Web Audio & Vibration
+  useEffect(() => {
+    const handleGesture = () => {
+      setHasUserInteracted(true);
+    };
+    window.addEventListener("pointerdown", handleGesture, { once: true });
+    window.addEventListener("keydown", handleGesture, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", handleGesture);
+      window.removeEventListener("keydown", handleGesture);
+    };
+  }, []);
+
+  // Check push support and initial subscription status
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const supported =
+      "Notification" in window &&
+      "serviceWorker" in navigator &&
+      "PushManager" in window;
+    setPushSupported(supported);
+
+    const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      ("standalone" in navigator && (navigator as any).standalone);
+    setIsIosSafariBrowser(isIos && !isStandalone);
+
+    if (supported) {
+      if (Notification.permission === "denied") {
+        setPushStatus("denied");
+      } else if (Notification.permission === "granted") {
+        if (token) {
+          fetch(`/api/guest/push?token=${encodeURIComponent(token.trim())}`)
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.isSubscribed) setPushStatus("subscribed");
+              else setPushStatus("prompt");
+            })
+            .catch(() => setPushStatus("prompt"));
+        } else {
+          setPushStatus("prompt");
+        }
+      } else {
+        setPushStatus("prompt");
+      }
+    }
+  }, [token]);
 
   const fetchStatus = async () => {
     if (!token.trim()) {
@@ -87,6 +195,21 @@ export default function GuestStatusView() {
 
       const json: GuestStatusData = await res.json();
       if (currentRequestId === latestRequestIdRef.current && isMountedRef.current) {
+        // Detect status transition for in-page vibration & audio chime fallback
+        const prevStatus = prevStatusRef.current;
+        if (prevStatus && prevStatus !== json.status) {
+          if (json.status === "REMINDED") {
+            triggerVibration();
+            playSoftChime();
+            setUrgentBanner("YOU'RE NEXT! PLEASE HEAD TOWARDS THE BOOTH NOW.");
+          } else if (json.status === "IN_PROGRESS") {
+            triggerVibration();
+            playSoftChime();
+            setUrgentBanner("IT'S YOUR TURN! PLEASE ENTER THE PHOTO BOOTH NOW.");
+          }
+        }
+        prevStatusRef.current = json.status;
+
         setStatusData(json);
         setIsNotFound(false);
         setIsReconnecting(false);
@@ -155,6 +278,82 @@ export default function GuestStatusView() {
       setCancelError(err?.message || "Network error. Please try again.");
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const handleEnableAlerts = async () => {
+    setHasUserInteracted(true);
+    playSoftChime();
+    triggerVibration();
+
+    if (!pushSupported) return;
+
+    setPushStatus("subscribing");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushStatus(permission === "denied" ? "denied" : "prompt");
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) {
+        console.warn("NEXT_PUBLIC_VAPID_PUBLIC_KEY is not configured.");
+        setPushStatus("subscribed");
+        return;
+      }
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey) as unknown as BufferSource,
+      });
+
+      const subJson = sub.toJSON();
+      const res = await fetch("/api/guest/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          subscription: subJson,
+        }),
+      });
+
+      if (res.ok) {
+        setPushStatus("subscribed");
+      } else {
+        setPushStatus("prompt");
+      }
+    } catch (err) {
+      console.warn("Push subscription failed:", err);
+      setPushStatus("prompt");
+    }
+  };
+
+  const handleTestPush = async () => {
+    if (isTestingPush) return;
+    setIsTestingPush(true);
+    setTestMessage(null);
+    try {
+      const res = await fetch("/api/guest/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, action: "test" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.notified) {
+        setTestMessage("Test sent! Check notification & vibration.");
+      } else {
+        setTestMessage("Test request processed.");
+      }
+      setTimeout(() => setTestMessage(null), 4000);
+    } catch {
+      setTestMessage("Could not send test push");
+      setTimeout(() => setTestMessage(null), 4000);
+    } finally {
+      setIsTestingPush(false);
     }
   };
 
@@ -238,6 +437,15 @@ export default function GuestStatusView() {
 
       {/* Main Status Body */}
       <main className="flex-1 flex flex-col justify-center py-4 space-y-4">
+        {/* Highlighted urgent banner flashed on REMINDED or IN_PROGRESS */}
+        {urgentBanner && (
+          <div className="rounded-2xl bg-accent px-4 py-3.5 text-center text-white shadow-lg animate-pulse">
+            <p className="font-mono text-xs font-bold uppercase tracking-wider">
+              {urgentBanner}
+            </p>
+          </div>
+        )}
+
         {/* Ticket Surface */}
         <Tile
           tone="surface"
@@ -336,6 +544,77 @@ export default function GuestStatusView() {
                   {estimated_time || "~5 mins"}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Web Push & In-Page Vibration Alert Controls */}
+          {(isWaiting || isReminded) && (
+            <div className="pt-4 border-t border-ink/5 mt-4 text-left">
+              {/* iPhone Safari not in standalone mode tip */}
+              {isIosSafariBrowser && (
+                <div className="mb-3 rounded-2xl bg-paper p-3 text-left border border-ink/10">
+                  <div className="flex items-start gap-2.5">
+                    <Smartphone className="h-4 w-4 shrink-0 text-accent mt-0.5" />
+                    <p className="font-sans text-[11px] text-muted leading-relaxed">
+                      <strong className="text-ink">iPhone alerts tip:</strong> Tap{" "}
+                      <strong>Share</strong>, then <strong>Add to Home Screen</strong>, and open Snap &amp; Snack from there to enable phone vibration &amp; notifications.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {pushSupported && (
+                <div>
+                  {pushStatus === "subscribed" && (
+                    <div className="flex items-center justify-between rounded-full bg-emerald-500/10 px-4 py-2 border border-emerald-500/20">
+                      <span className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-emerald-700">
+                        <Bell className="h-3.5 w-3.5" /> Alerts on
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleTestPush}
+                        disabled={isTestingPush}
+                        className="font-mono text-[11px] font-medium underline text-emerald-800 hover:text-emerald-950 transition-colors"
+                      >
+                        {isTestingPush ? "Testing..." : "Test"}
+                      </button>
+                    </div>
+                  )}
+
+                  {pushStatus === "denied" && (
+                    <div className="flex items-center gap-2 rounded-2xl bg-danger/10 px-3.5 py-2.5 text-left border border-danger/20">
+                      <BellOff className="h-4 w-4 shrink-0 text-danger" />
+                      <p className="font-sans text-[11px] text-danger font-medium leading-tight">
+                        Alerts blocked, change it in your browser settings
+                      </p>
+                    </div>
+                  )}
+
+                  {(pushStatus === "prompt" || pushStatus === "subscribing") && (
+                    <Pill
+                      variant="secondary"
+                      onClick={handleEnableAlerts}
+                      disabled={pushStatus === "subscribing"}
+                      className="w-full min-h-[44px] justify-center gap-2 text-xs font-mono uppercase tracking-wider"
+                    >
+                      <Bell className="h-4 w-4 text-accent" />
+                      <span>{pushStatus === "subscribing" ? "Enabling alerts..." : "Enable alerts"}</span>
+                    </Pill>
+                  )}
+
+                  {testMessage && (
+                    <p className="mt-1.5 font-mono text-[10px] text-emerald-700 text-center animate-fadeIn">
+                      {testMessage}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!hasUserInteracted && (
+                <p className="mt-2 text-center font-mono text-[10px] text-muted">
+                  Tap anywhere on screen to enable sound &amp; vibration alerts
+                </p>
+              )}
             </div>
           )}
 
