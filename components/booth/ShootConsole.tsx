@@ -123,7 +123,12 @@ export default function ShootConsole() {
   const [gifDataUrl, setGifDataUrl] = useState<string | null>(null);
   const [gifStatus, setGifStatus] = useState<"idle" | "generating" | "done" | "error">("idle");
   const gifDataUrlRef = useRef<string | null>(null);
+  const gifStatusRef = useRef<"idle" | "generating" | "done" | "error">("idle");
   const shouldMakeGif = Boolean(activeEvent?.include_gif);
+
+  useEffect(() => {
+    gifStatusRef.current = gifStatus;
+  }, [gifStatus]);
 
   // Confirmation Modals
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
@@ -485,10 +490,12 @@ export default function ShootConsole() {
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        console.error("[ShootConsole] GIF upload failed:", errJson);
+        console.error("[ShootConsole] GIF upload failed:", errJson?.error || errJson);
+        setGifStatus("error");
       }
-    } catch (err) {
-      console.error("[ShootConsole] Failed to upload animated GIF to storage:", err);
+    } catch (err: any) {
+      console.error("[ShootConsole] Failed to upload animated GIF to storage:", err?.message || err);
+      setGifStatus("error");
     }
   };
 
@@ -511,14 +518,16 @@ export default function ShootConsole() {
         paletteColors: 256,
         frameDelayMs: 700,
         lastFramePauseMs: 500,
-        maxBytes: 3 * 1024 * 1024,
+        maxBytes: 25 * 1024 * 1024,
       });
 
       setGifDataUrl(result.dataUrl);
       gifDataUrlRef.current = result.dataUrl;
       setGifStatus("done");
-    } catch (err) {
-      console.warn("[ShootConsole] GIF generation failed:", err);
+      // Pre-upload the GIF in the background immediately once generated
+      uploadGif(result.dataUrl);
+    } catch (err: any) {
+      console.error("[ShootConsole] GIF generation failed:", err?.message || err);
       setGifStatus("error");
     }
   };
@@ -952,13 +961,14 @@ export default function ShootConsole() {
 
       // 2b. Ensure animated GIF is uploaded if enabled
       let currentGif = gifDataUrlRef.current || gifDataUrl;
-      if (!currentGif && shouldMakeGif && gifStatus === "generating") {
-        for (let i = 0; i < 15; i++) {
-          await new Promise((r) => setTimeout(r, 100));
+      if (!currentGif && shouldMakeGif) {
+        for (let i = 0; i < 50; i++) {
           if (gifDataUrlRef.current) {
             currentGif = gifDataUrlRef.current;
             break;
           }
+          if ((gifStatusRef.current as string) === "error") break;
+          await new Promise((r) => setTimeout(r, 100));
         }
       }
       if (currentGif) {

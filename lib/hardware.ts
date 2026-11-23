@@ -33,6 +33,24 @@ export interface CloudStatus {
   googleDriveSync: "Off (optional)";
 }
 
+function formatHardwareTimestamp(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: true,
+    timeZone: "Asia/Manila",
+  }).format(date);
+}
+
+function formatHardwareShortTime(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Manila",
+  }).format(date);
+}
+
 export interface CaptureOptions {
   type?: "PHOTO" | "Photo" | "GIF" | "Video";
   pose?: string;
@@ -80,10 +98,7 @@ class MockHardwareService implements IHardwareService {
   private selectedCamera = "Sony a7 IV";
   private printsThisSession = 0;
   private paperLoaded = 18; // Default 18-sheet SELPHY pack
-  private lastWebhookTime = new Date(Date.now() - 15 * 60 * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  private lastWebhookTime = formatHardwareShortTime(new Date(Date.now() - 15 * 60 * 1000));
 
   private mockErrors = {
     camera: false,
@@ -173,7 +188,7 @@ class MockHardwareService implements IHardwareService {
   async testCapture(model?: string): Promise<HardwareTestResult> {
     await this.delay(500);
     const camera = model || this.selectedCamera;
-    const now = new Date().toLocaleTimeString();
+    const now = formatHardwareTimestamp();
 
     if (this.mockErrors.camera) {
       return {
@@ -233,7 +248,7 @@ class MockHardwareService implements IHardwareService {
 
     const type = options?.type || "Photo";
     const pose = options?.pose || "Classic couple";
-    const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const timestamp = formatHardwareShortTime();
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
       <rect width="800" height="600" fill="#1e1c1a"/>
@@ -289,7 +304,7 @@ class MockHardwareService implements IHardwareService {
 
   async testPrint(): Promise<HardwareTestResult & { paperLoaded: number; printsThisSession: number }> {
     await this.delay(600);
-    const now = new Date().toLocaleTimeString();
+    const now = formatHardwareTimestamp();
 
     if (this.mockErrors.printer) {
       return {
@@ -557,7 +572,7 @@ export class WebcamHardware implements IHardwareService {
   }
 
   async testCapture(model?: string): Promise<HardwareTestResult> {
-    const now = new Date().toLocaleTimeString();
+    const now = formatHardwareTimestamp();
     if (this.mockErrors.camera) {
       return {
         success: false,
@@ -738,7 +753,7 @@ export class WebcamHardware implements IHardwareService {
   }
 
   async testPrint(): Promise<HardwareTestResult & { paperLoaded: number; printsThisSession: number }> {
-    const now = new Date().toLocaleTimeString();
+    const now = formatHardwareTimestamp();
 
     if (this.mockErrors.printer) {
       return {

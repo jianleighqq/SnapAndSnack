@@ -1,5 +1,65 @@
 import type { Event, EventType, EventStatus, PrintLayout } from "./types";
 
+export const EVENT_TIMEZONE = "Asia/Manila";
+
+/**
+ * Extracts YYYY-MM-DD date and HH:mm time in the configured event timezone (Asia/Manila).
+ * Prevents hydration and timezone offset drift between server UTC and client browser.
+ */
+export function extractDateTimeParts(
+  isoDateStr: string,
+  timeZone: string = EVENT_TIMEZONE
+): { date: string; time: string } {
+  try {
+    const d = new Date(isoDateStr);
+    if (isNaN(d.getTime())) return { date: "", time: "18:00" };
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+
+    const year = parts.find((p) => p.type === "year")?.value || "2026";
+    const month = parts.find((p) => p.type === "month")?.value || "01";
+    const day = parts.find((p) => p.type === "day")?.value || "01";
+    const hour = parts.find((p) => p.type === "hour")?.value || "18";
+    const minute = parts.find((p) => p.type === "minute")?.value || "00";
+
+    return {
+      date: `${year}-${month}-${day}`,
+      time: `${hour}:${minute}`,
+    };
+  } catch {
+    return { date: "", time: "18:00" };
+  }
+}
+
+/**
+ * Formats an ISO date string into "MMM d, yyyy" (e.g. "Nov 28, 2026")
+ * using the fixed event timezone (Asia/Manila) to guarantee matching output on server & client.
+ */
+export function formatEventDisplayDate(
+  isoDateStr: string,
+  timeZone: string = EVENT_TIMEZONE
+): string {
+  try {
+    const d = new Date(isoDateStr);
+    if (isNaN(d.getTime())) return "Upcoming";
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone,
+    }).format(d);
+  } catch {
+    return "Upcoming";
+  }
+}
+
 export interface EventFormInput {
   name: string;
   event_type: EventType;

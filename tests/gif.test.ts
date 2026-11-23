@@ -18,26 +18,26 @@ test("calculateFrameDelay applies 0.7s per frame and 0.5s pause on the last fram
   const totalFrames = 3;
 
   // Frame 1 (index 0): 700 ms (0.7 s)
-  const delay0 = calculateFrameDelay(0, totalFrames);
+  const delay0 = calculateFrameDelay(0, totalFrames, 700);
   assert.strictEqual(delay0, 700);
 
   // Frame 2 (index 1): 700 ms (0.7 s)
-  const delay1 = calculateFrameDelay(1, totalFrames);
+  const delay1 = calculateFrameDelay(1, totalFrames, 700);
   assert.strictEqual(delay1, 700);
 
   // Frame 3 (index 2, last frame): 700 ms + 500 ms = 1200 ms (0.7s + 0.5s pause)
-  const delay2 = calculateFrameDelay(2, totalFrames);
+  const delay2 = calculateFrameDelay(2, totalFrames, 700);
   assert.strictEqual(delay2, 1200);
 
   // Single frame fallback
-  assert.strictEqual(calculateFrameDelay(0, 1), 700);
+  assert.strictEqual(calculateFrameDelay(0, 1, 700), 700);
 });
 
-test("exceedsMaxBytes accurately checks against 3 MB limit", () => {
-  assert.strictEqual(exceedsMaxBytes(2 * 1024 * 1024), false);
-  assert.strictEqual(exceedsMaxBytes(3 * 1024 * 1024), false);
-  assert.strictEqual(exceedsMaxBytes(3 * 1024 * 1024 + 1), true);
-  assert.strictEqual(exceedsMaxBytes(4 * 1024 * 1024), true);
+test("exceedsMaxBytes accurately checks against size limits", () => {
+  assert.strictEqual(exceedsMaxBytes(24 * 1024 * 1024), false);
+  assert.strictEqual(exceedsMaxBytes(25 * 1024 * 1024), false);
+  assert.strictEqual(exceedsMaxBytes(25 * 1024 * 1024 + 1), true);
+  assert.strictEqual(exceedsMaxBytes(3 * 1024 * 1024 + 1, 3 * 1024 * 1024), true);
 });
 
 test("bytesToDataUrl encodes Uint8Array to data:image/gif;base64", () => {

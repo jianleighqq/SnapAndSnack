@@ -1,9 +1,9 @@
 export interface GifGenerationOptions {
-  width?: number;
+  width?: number; // max 640px
   paletteColors?: 128 | 256;
-  frameDelayMs?: number; // default 700ms (0.7s)
-  lastFramePauseMs?: number; // default 500ms (0.5s pause, total 1200ms)
-  maxBytes?: number; // default 3 MB
+  frameDelayMs?: number; // default ~110ms (~9 fps, within 8-10 fps) or 700ms for slideshow
+  lastFramePauseMs?: number; // default 500ms
+  maxBytes?: number; // default 25 MB
 }
 
 export interface GifResult {
@@ -20,9 +20,11 @@ export interface GifEncLib {
 }
 
 export const DEFAULT_GIF_WIDTH = 480;
-export const DEFAULT_FRAME_DELAY_MS = 700; // 0.7 s
+export const MAX_FRAME_WIDTH = 640;
+export const MAX_FRAMES = 12;
+export const DEFAULT_FRAME_DELAY_MS = 110; // ~9 fps (8-10 fps range)
 export const DEFAULT_LAST_FRAME_PAUSE_MS = 500; // 0.5 s pause
-export const MAX_GIF_BYTES = 3 * 1024 * 1024; // 3 MB
+export const MAX_GIF_BYTES = 25 * 1024 * 1024; // 25 MB max size cap for GIF uploads
 
 let cachedLib: GifEncLib | null = null;
 
@@ -180,6 +182,9 @@ export async function createAnimatedGif(
     throw new Error("No images provided for GIF generation");
   }
 
+  // Cap at max 12 frames to prevent huge memory consumption and massive GIFs
+  const framesToProcess = imageUrls.slice(0, MAX_FRAMES);
+
   const baseDelayMs = options.frameDelayMs ?? DEFAULT_FRAME_DELAY_MS;
   const lastPauseMs = options.lastFramePauseMs ?? DEFAULT_LAST_FRAME_PAUSE_MS;
   const maxBytes = options.maxBytes ?? MAX_GIF_BYTES;
@@ -187,11 +192,11 @@ export async function createAnimatedGif(
   // Defensively resolve gifenc functions before processing
   const lib = await getGifEncLib();
 
-  // Load all images concurrently
-  const loadedImages = await Promise.all(imageUrls.map(loadImageElement));
+  // Load images concurrently
+  const loadedImages = await Promise.all(framesToProcess.map(loadImageElement));
 
-  // Attempt 1: Target 480px, 256 colors
-  let targetWidth = options.width ?? DEFAULT_GIF_WIDTH;
+  // Target width downscaled to max 640px
+  let targetWidth = Math.min(options.width ?? DEFAULT_GIF_WIDTH, MAX_FRAME_WIDTH);
   let paletteColors: 128 | 256 = options.paletteColors ?? 256;
 
   let { bytes, width, height } = encodeFrames(
@@ -203,7 +208,7 @@ export async function createAnimatedGif(
     lib
   );
 
-  // Attempt 2: If exceeds 3 MB, try 128 colors
+  // If exceeds maxBytes, try 128 colors
   if (exceedsMaxBytes(bytes.byteLength, maxBytes) && paletteColors === 256) {
     paletteColors = 128;
     const retry = encodeFrames(loadedImages, targetWidth, paletteColors, baseDelayMs, lastPauseMs, lib);
@@ -212,7 +217,7 @@ export async function createAnimatedGif(
     height = retry.height;
   }
 
-  // Attempt 3: If still exceeds 3 MB, downscale width to 360px with 128 colors
+  // If still exceeds maxBytes, downscale width to 360px with 128 colors
   if (exceedsMaxBytes(bytes.byteLength, maxBytes)) {
     targetWidth = 360;
     paletteColors = 128;

@@ -18,7 +18,11 @@ export async function requireOperatorSession(request?: Request): Promise<boolean
     const cookieHeader = request.headers.get("cookie") || "";
     const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`));
     if (match) {
-      token = decodeURIComponent(match[1]);
+      try {
+        token = decodeURIComponent(match[1]);
+      } catch {
+        token = match[1];
+      }
     }
   }
 

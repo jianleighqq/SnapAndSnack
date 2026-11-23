@@ -24,13 +24,13 @@ export const MINIMAL_JPEG_BUFFER = Buffer.from([
 /**
  * Validates that an image buffer matches the required binary magic bytes:
  * - JPEG (PHOTO / STRIP): FF D8 FF
- * - GIF (GIF): 47 49 46 38 ('GIF8')
+ * - GIF (GIF): 47 49 46 38 37|39 61 ('GIF87a' or 'GIF89a')
  */
 export function validateImageMagicBytes(
   buffer: Buffer | Uint8Array,
   mediaType: "PHOTO" | "STRIP" | "GIF"
 ): boolean {
-  if (!buffer || buffer.length < 4) return false;
+  if (!buffer || buffer.length < 3) return false;
 
   if (mediaType === "PHOTO" || mediaType === "STRIP") {
     // Standard JPEG Start of Image (SOI) marker followed by marker byte 0xFF
@@ -38,12 +38,15 @@ export function validateImageMagicBytes(
   }
 
   if (mediaType === "GIF") {
-    // Standard GIF header ('GIF8')
+    // Standard GIF header ('GIF87a' or 'GIF89a')
+    if (buffer.length < 6) return false;
     return (
       buffer[0] === 0x47 &&
       buffer[1] === 0x49 &&
       buffer[2] === 0x46 &&
-      buffer[3] === 0x38
+      buffer[3] === 0x38 &&
+      (buffer[4] === 0x37 || buffer[4] === 0x39) &&
+      buffer[5] === 0x61
     );
   }
 
@@ -166,13 +169,15 @@ export function validateUploadMagicBytes(
     }
   }
 
-  // GIF: GIF8 (47 49 46 38)
-  if (allowed.includes("gif")) {
+  // GIF: GIF87a (47 49 46 38 37 61) or GIF89a (47 49 46 38 39 61)
+  if (allowed.includes("gif") && buffer.length >= 6) {
     if (
       buffer[0] === 0x47 &&
       buffer[1] === 0x49 &&
       buffer[2] === 0x46 &&
-      buffer[3] === 0x38
+      buffer[3] === 0x38 &&
+      (buffer[4] === 0x37 || buffer[4] === 0x39) &&
+      buffer[5] === 0x61
     ) {
       return true;
     }

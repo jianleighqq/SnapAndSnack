@@ -257,11 +257,12 @@ export async function GET(request: Request) {
     // 3. Find event name
     const { data: eventRow } = await supabaseServer
       .from("events")
-      .select("name")
+      .select("name, include_gif")
       .eq("id", guest.event_id)
       .maybeSingle();
 
     const eventName = eventRow?.name || "Snap & Snack Event";
+    const includeGif = Boolean(eventRow?.include_gif);
     const firstName = guest.full_name?.trim().split(/\s+/)[0] || "Guest";
 
     if (queueIds.length === 0) {
@@ -270,6 +271,7 @@ export async function GET(request: Request) {
           event_name: eventName,
           first_name: firstName,
           queue_number: queueNumber,
+          include_gif: includeGif,
           strip: null,
           gif: null,
           photos: [],
@@ -293,6 +295,7 @@ export async function GET(request: Request) {
           event_name: eventName,
           first_name: firstName,
           queue_number: queueNumber,
+          include_gif: includeGif,
           strip: null,
           gif: null,
           photos: [],
@@ -314,6 +317,7 @@ export async function GET(request: Request) {
           event_name: eventName,
           first_name: firstName,
           queue_number: queueNumber,
+          include_gif: includeGif,
           strip: null,
           gif: null,
           photos: [],
@@ -367,6 +371,7 @@ export async function GET(request: Request) {
         event_name: eventName,
         first_name: firstName,
         queue_number: queueNumber,
+        include_gif: includeGif,
         strip,
         gif,
         photos,

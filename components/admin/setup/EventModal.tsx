@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import type { Event, EventType, PrintLayout } from "@/lib/types";
-import { validateEventInput, generateEventCode } from "@/lib/events";
+import { validateEventInput, generateEventCode, extractDateTimeParts } from "@/lib/events";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Hairline } from "@/components/ui/Hairline";
@@ -65,11 +65,13 @@ export default function EventModal({
       const end = new Date(eventToEdit.end_time);
 
       if (!isNaN(start.getTime())) {
-        setDate(start.toISOString().split("T")[0]);
-        setStartTime(start.toTimeString().slice(0, 5));
+        const parts = extractDateTimeParts(eventToEdit.start_time);
+        setDate(parts.date);
+        setStartTime(parts.time);
       }
       if (!isNaN(end.getTime())) {
-        setEndTime(end.toTimeString().slice(0, 5));
+        const parts = extractDateTimeParts(eventToEdit.end_time);
+        setEndTime(parts.time);
       }
 
       setAvgMinutes(eventToEdit.avg_shoot_minutes || 5);
@@ -86,8 +88,8 @@ export default function EventModal({
       setEventType("Corporate");
       const today = new Date();
       today.setDate(today.getDate() + 7); // Default 1 week ahead
-      const dateString = today.toISOString().split("T")[0];
-      setDate(dateString);
+      const defaultParts = extractDateTimeParts(today.toISOString());
+      setDate(defaultParts.date);
       setStartTime("18:00");
       setEndTime("23:00");
       setAvgMinutes(5);
@@ -133,8 +135,8 @@ export default function EventModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const startIso = `${date}T${startTime}:00Z`;
-    const endIso = `${date}T${endTime}:00Z`;
+    const startIso = `${date}T${startTime}:00+08:00`;
+    const endIso = `${date}T${endTime}:00+08:00`;
 
     const inputData = {
       name: name.trim(),

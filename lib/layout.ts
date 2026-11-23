@@ -27,8 +27,8 @@ export function composePrintLayout({
   const height = 1800;
 
   const displayDate = dateStr
-    ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    ? new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" })
+    : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" });
 
   const safeEventName = eventName.toUpperCase();
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   Calendar,
   Cake,
@@ -14,6 +14,7 @@ import {
   Plus,
 } from "lucide-react";
 import type { Event, EventType, EventStatus } from "@/lib/types";
+import { formatEventDisplayDate, EVENT_TIMEZONE } from "@/lib/events";
 import { Tile } from "@/components/ui/Tile";
 import { Label } from "@/components/ui/Label";
 import { Pill } from "@/components/ui/Pill";
@@ -45,18 +46,8 @@ export function getEventTypeIcon(type?: EventType) {
   }
 }
 
-export function formatEventDate(isoDate: string): string {
-  try {
-    const d = new Date(isoDate);
-    if (isNaN(d.getTime())) return "Upcoming";
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return "Upcoming";
-  }
+export function formatEventDate(isoDate: string, timeZone: string = EVENT_TIMEZONE): string {
+  return formatEventDisplayDate(isoDate, timeZone);
 }
 
 export function StatusBadge({ status }: { status: EventStatus }) {
@@ -89,6 +80,10 @@ export default function EventsList({
   onSelectEvent,
   onOpenAddModal,
 }: EventsListProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   return (
     <Tile tone="surface" className="flex flex-col h-full overflow-hidden">
       {/* Column Title */}
@@ -161,7 +156,7 @@ export default function EventsList({
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-muted">
-                      <span>{formatEventDate(evt.start_time)}</span>
+                      <span suppressHydrationWarning>{formatEventDate(evt.start_time)}</span>
                       <span className="font-mono text-[11px] font-bold text-ink bg-ink/5 px-2 py-0.5 rounded-full">
                         {evt.event_code}
                       </span>

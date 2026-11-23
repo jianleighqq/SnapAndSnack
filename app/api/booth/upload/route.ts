@@ -8,7 +8,8 @@ import { validateImageMagicBytes } from "@/lib/image-convert";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_GIF_BYTES = 25 * 1024 * 1024; // 25 MB
+const MAX_STANDARD_BYTES = 10 * 1024 * 1024; // 10 MB
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseDataUrl(dataUrl: string): { mimeType: string; buffer: Buffer } | null {
@@ -123,10 +124,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (buffer.byteLength > MAX_BYTES) {
+    const maxAllowedBytes = mediaType === "GIF" ? MAX_GIF_BYTES : MAX_STANDARD_BYTES;
+    const maxMb = mediaType === "GIF" ? 25 : 10;
+    if (buffer.byteLength > maxAllowedBytes) {
+      console.error(`[Booth Upload] ${mediaType} exceeds ${maxMb}MB size cap: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
       return NextResponse.json(
         {
-          error: `Image exceeds maximum allowed size of 5 MB (${(
+          error: `${mediaType} exceeds maximum allowed size of ${maxMb} MB (${(
             buffer.byteLength /
             1024 /
             1024
@@ -136,9 +140,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify binary magic bytes (JPEG: FF D8 FF; GIF: 47 49 46 38)
+    // Verify binary magic bytes (JPEG: FF D8 FF; GIF: GIF87a/GIF89a)
     if (!validateImageMagicBytes(buffer, mediaType)) {
-      const expected = mediaType === "GIF" ? "GIF8 (47 49 46 38)" : "JPEG (FF D8 FF)";
+      const expected = mediaType === "GIF" ? "GIF87a or GIF89a (47 49 46 38 37|39 61)" : "JPEG (FF D8 FF)";
+      console.error(`[Booth Upload] ${mediaType} failed magic bytes verification`);
       return NextResponse.json(
         {
           error: `Invalid binary image data: ${mediaType} must begin with magic bytes for ${expected}`,
@@ -267,6 +272,14 @@ export async function POST(request: Request) {
         assetId = inserted?.id || null;
       }
     } else if (mediaType === "GIF") {
+      // Check if session already has gallery-published assets to avoid race conditions
+      const { count: galleryAssetCount } = await supabaseServer
+        .from("media_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", targetSessionId)
+        .eq("in_gallery", true);
+      const shouldBeInGallery = (galleryAssetCount || 0) > 0;
+
       // GIF: Check existing row for idempotency on Retry Save
       const { data: existing, error: selectErr } = await supabaseServer
         .from("media_assets")
@@ -284,6 +297,7 @@ export async function POST(request: Request) {
           .from("media_assets")
           .update({
             storage_path: storagePath,
+            in_gallery: shouldBeInGallery ? true : false,
           })
           .eq("id", existing[0].id)
           .select("id")
@@ -304,7 +318,7 @@ export async function POST(request: Request) {
             session_id: targetSessionId,
             media_type: "GIF",
             storage_path: storagePath,
-            in_gallery: false,
+            in_gallery: shouldBeInGallery ? true : false,
           })
           .select("id")
           .single();

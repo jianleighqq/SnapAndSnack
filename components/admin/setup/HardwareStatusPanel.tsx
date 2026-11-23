@@ -33,6 +33,16 @@ import { Label } from "@/components/ui/Label";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { cn } from "@/components/ui/cn";
 
+function formatTimestamp(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: true,
+    timeZone: "Asia/Manila",
+  }).format(date);
+}
+
 interface HardwareStatusPanelProps {
   selectedEvent: Event | null;
   activeEvent?: Event | null;
@@ -177,7 +187,7 @@ export default function HardwareStatusPanel({
       setCaptureResult({
         success: false,
         message: err?.message || "Capture test failed (mock)",
-        timestamp: new Date().toLocaleTimeString(),
+        timestamp: formatTimestamp(),
       });
     } finally {
       setIsCapturing(false);
@@ -198,7 +208,7 @@ export default function HardwareStatusPanel({
       setPrintResult({
         success: false,
         message: err?.message || "Print test failed (mock)",
-        timestamp: new Date().toLocaleTimeString(),
+        timestamp: formatTimestamp(),
       });
     } finally {
       setIsPrinting(false);
@@ -224,15 +234,15 @@ export default function HardwareStatusPanel({
         success: updated.status === "READY",
         message:
           updated.status === "READY"
-            ? `All cloud systems verified online at ${new Date().toLocaleTimeString()}. (mock)`
-            : `Network or database connection issues detected at ${new Date().toLocaleTimeString()}. (mock)`,
-        timestamp: new Date().toLocaleTimeString(),
+            ? `All cloud systems verified online at ${formatTimestamp()}. (mock)`
+            : `Network or database connection issues detected at ${formatTimestamp()}. (mock)`,
+        timestamp: formatTimestamp(),
       });
     } catch (err: any) {
       setCloudResult({
         success: false,
         message: err?.message || "Network recheck failed (mock)",
-        timestamp: new Date().toLocaleTimeString(),
+        timestamp: formatTimestamp(),
       });
     } finally {
       setIsRecheckingCloud(false);
@@ -489,7 +499,7 @@ export default function HardwareStatusPanel({
                   )}
                 </div>
                 <p className="text-xs text-muted font-medium mt-0.5">
-                  {cameraStatus?.model} · {cameraStatus?.resolution}
+                  {cameraStatus ? `${cameraStatus.model} · ${cameraStatus.resolution}` : "Sony a7 IV · 1920x1080"}
                 </p>
               </div>
             </div>
@@ -758,7 +768,7 @@ export default function HardwareStatusPanel({
             {/* Webhook */}
             <div className="flex items-center justify-between p-3 bg-surface rounded-xl">
               <span className="font-medium text-ink">Registration Webhook</span>
-              <span className="font-mono text-xs text-muted text-right truncate pl-2">
+              <span suppressHydrationWarning className="font-mono text-xs text-muted text-right truncate pl-2">
                 {cloudStatus?.registrationWebhook.lastReceivedAt || "No recent registrations"}
               </span>
             </div>

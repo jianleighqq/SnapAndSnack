@@ -1,12 +1,20 @@
 /** @type {import('next').NextConfig} */
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+let supabaseOrigin = "";
+if (supabaseUrl) {
+  try {
+    supabaseOrigin = new URL(supabaseUrl).origin;
+  } catch {}
+}
+
 const ContentSecurityPolicy = `
   default-src 'self';
   script-src 'self' 'unsafe-eval' 'unsafe-inline';
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  img-src 'self' data: blob: https://*.supabase.co https://*.supabase.in;
+  img-src 'self' data: blob: https://*.supabase.co https://*.supabase.in ${supabaseOrigin};
   font-src 'self' https://fonts.gstatic.com data:;
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com;
-  media-src 'self' blob:;
+  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com ${supabaseOrigin};
+  media-src 'self' blob: data: ${supabaseOrigin};
   frame-ancestors 'none';
 `
   .replace(/\s{2,}/g, " ")

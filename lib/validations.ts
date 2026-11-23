@@ -27,6 +27,10 @@ export const printLayoutSchema = z.enum(["SINGLE", "STRIP", "GRID"]);
 export const templateModeSchema = z.enum(["OPERATOR", "GUEST"]);
 export const eventStatusSchema = z.enum(["SCHEDULED", "ACTIVE", "CLOSED"]);
 
+export const isoDateTimeSchema = z.string().refine((val) => !isNaN(Date.parse(val)), {
+  message: "Invalid ISO datetime format",
+});
+
 export const eventInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
   event_type: eventTypeSchema,
@@ -35,9 +39,9 @@ export const eventInputSchema = z.object({
     .trim()
     .min(3)
     .max(20)
-    .regex(/^[A-Z0-9]+$/, { message: "Event code must be uppercase alphanumeric" }),
-  start_time: z.string().datetime({ offset: true }),
-  end_time: z.string().datetime({ offset: true }),
+    .regex(/^[A-Za-z0-9_-]+$/, { message: "Event code must be alphanumeric with optional dashes or underscores" }),
+  start_time: isoDateTimeSchema,
+  end_time: isoDateTimeSchema,
   avg_shoot_minutes: z.number().int().min(1).max(60).default(3),
   shots_per_guest: z.number().int().min(1).max(4).default(3),
   max_retakes: z.number().int().min(0).max(5).default(2),

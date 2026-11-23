@@ -8,8 +8,9 @@ import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Maximum payload 5 MB
-const MAX_BYTES = 5 * 1024 * 1024;
+// Maximum payload: 25 MB for GIF, 10 MB for standard photos/strips
+const MAX_GIF_BYTES = 25 * 1024 * 1024;
+const MAX_STANDARD_BYTES = 10 * 1024 * 1024;
 
 // UUID validation regex (8-4-4-4-12 hex)
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -85,10 +86,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (mediaType !== "PHOTO" && mediaType !== "STRIP") {
+    if (mediaType !== "PHOTO" && mediaType !== "STRIP" && mediaType !== "GIF") {
       console.error("[Upload] Invalid mediaType:", mediaType);
       return NextResponse.json(
-        { error: "Invalid mediaType: must be PHOTO or STRIP" },
+        { error: "Invalid mediaType: must be PHOTO, STRIP, or GIF" },
         { status: 400 }
       );
     }
@@ -137,33 +138,41 @@ export async function POST(request: Request) {
     }
 
     const { mimeType, buffer } = parsed;
-    if (buffer.byteLength > MAX_BYTES) {
-      console.error(`[Upload] Image payload exceeds 5MB: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+    const maxAllowedBytes = mediaType === "GIF" ? MAX_GIF_BYTES : MAX_STANDARD_BYTES;
+    const maxMb = mediaType === "GIF" ? 25 : 10;
+
+    if (buffer.byteLength > maxAllowedBytes) {
+      console.error(`[Upload] ${mediaType} payload exceeds ${maxMb}MB: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
       return NextResponse.json(
-        { error: `Image exceeds maximum allowed size of 5 MB (${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB)` },
+        { error: `${mediaType} exceeds maximum allowed size of ${maxMb} MB (${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB)` },
         { status: 400 }
       );
     }
 
-    // Verify binary magic bytes (JPEG: FF D8 FF)
+    // Verify binary magic bytes (JPEG: FF D8 FF for PHOTO/STRIP; GIF: GIF87a/GIF89a for GIF)
     if (!validateImageMagicBytes(buffer, mediaType as any)) {
+      const expected = mediaType === "GIF" ? "GIF87a or GIF89a (47 49 46 38 37|39 61)" : "JPEG (FF D8 FF)";
       return NextResponse.json(
-        { error: `Invalid binary image data: ${mediaType} must begin with magic bytes for JPEG (FF D8 FF)` },
+        { error: `Invalid binary image data: ${mediaType} must begin with magic bytes for ${expected}` },
         { status: 400 }
       );
     }
 
-    // 3. Storage path: {event_id}/{guest_id}/shot-{shot_number}.jpg or {event_id}/{guest_id}/strip.jpg
+    // 3. Storage path: {event_id}/{guest_id}/shot-{shot_number}.jpg, strip.jpg, or animation.gif
     const storagePath =
       mediaType === "PHOTO"
         ? `${eventId}/${guestId}/shot-${shotNumber || 1}.jpg`
+        : mediaType === "GIF"
+        ? `${eventId}/${guestId}/animation.gif`
         : `${eventId}/${guestId}/strip.jpg`;
+
+    const storageContentType = mediaType === "GIF" ? "image/gif" : "image/jpeg";
 
     // 4. Upload to Supabase Storage private 'photos' bucket with upsert: true
     const { error: uploadError } = await supabaseServer.storage
       .from("photos")
       .upload(storagePath, buffer, {
-        contentType: "image/jpeg",
+        contentType: storageContentType,
         upsert: true,
       });
 
@@ -226,6 +235,56 @@ export async function POST(request: Request) {
 
         if (insertErr) {
           console.error("[Upload] media_assets insert error:", insertErr);
+          throw new Error(insertErr.message);
+        }
+        assetRow = inserted;
+      }
+    } else if (mediaType === "GIF") {
+      // Check if session already has gallery-published assets to avoid race conditions
+      const { count: galleryAssetCount } = await supabaseServer
+        .from("media_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", targetSessionId)
+        .eq("in_gallery", true);
+      const shouldBeInGallery = (galleryAssetCount || 0) > 0;
+
+      const { data: existing } = await supabaseServer
+        .from("media_assets")
+        .select("id")
+        .eq("session_id", targetSessionId)
+        .eq("media_type", "GIF")
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const { data: updated, error: updateErr } = await supabaseServer
+          .from("media_assets")
+          .update({
+            storage_path: storagePath,
+            in_gallery: shouldBeInGallery ? true : false,
+          })
+          .eq("id", existing[0].id)
+          .select("id")
+          .single();
+
+        if (updateErr) {
+          console.error("[Upload] media_assets GIF update error:", updateErr);
+          throw new Error(updateErr.message);
+        }
+        assetRow = updated;
+      } else {
+        const { data: inserted, error: insertErr } = await supabaseServer
+          .from("media_assets")
+          .insert({
+            session_id: targetSessionId,
+            media_type: "GIF",
+            storage_path: storagePath,
+            in_gallery: shouldBeInGallery ? true : false,
+          })
+          .select("id")
+          .single();
+
+        if (insertErr) {
+          console.error("[Upload] media_assets GIF insert error:", insertErr);
           throw new Error(insertErr.message);
         }
         assetRow = inserted;
