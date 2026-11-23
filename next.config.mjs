@@ -13,8 +13,9 @@ const ContentSecurityPolicy = `
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   img-src 'self' data: blob: https://*.supabase.co https://*.supabase.in ${supabaseOrigin};
   font-src 'self' https://fonts.gstatic.com data:;
-  connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com ${supabaseOrigin};
+  connect-src 'self' data: blob: https://*.supabase.co wss://*.supabase.co https://api.resend.com ${supabaseOrigin};
   media-src 'self' blob: data: ${supabaseOrigin};
+  worker-src 'self' blob:;
   frame-ancestors 'none';
 `
   .replace(/\s{2,}/g, " ")

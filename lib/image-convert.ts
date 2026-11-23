@@ -54,6 +54,27 @@ export function validateImageMagicBytes(
 }
 
 /**
+ * Synchronously converts a base64 Data URL to a Blob in memory without fetch().
+ * Avoids browser network stack and CSP connect-src restrictions on data: URLs.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const commaIdx = dataUrl.indexOf(",");
+  if (commaIdx === -1) {
+    throw new Error("Invalid data URL: missing comma");
+  }
+  const meta = dataUrl.slice(0, commaIdx);
+  const rawBase64 = dataUrl.slice(commaIdx + 1);
+  const mime = meta.match(/:(.*?);/)?.[1] || "application/octet-stream";
+  const binaryStr = atob(rawBase64);
+  const len = binaryStr.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+/**
  * Converts a data URL, blob URL, or SVG into a real binary JPEG or GIF Blob.
  * In browser environments, rasterizes SVG and non-JPEG inputs onto an HTML5 canvas
  * to produce genuine JPEG bytes starting with magic bytes FF D8 FF.
@@ -64,13 +85,17 @@ export async function toBinaryImageBlob(
   defaultWidth = 1200,
   defaultHeight = 1800
 ): Promise<Blob> {
-  if (mediaType === "GIF") {
-    const res = await fetch(dataUrlOrSrc);
-    return res.blob();
+  // If base64 data URL for GIF or JPEG, convert directly in memory without fetch()
+  if (dataUrlOrSrc.startsWith("data:image/gif") || (mediaType === "GIF" && dataUrlOrSrc.startsWith("data:"))) {
+    return dataUrlToBlob(dataUrlOrSrc);
   }
 
-  // If already a binary JPEG data URL, fetch and extract blob
   if (dataUrlOrSrc.startsWith("data:image/jpeg")) {
+    return dataUrlToBlob(dataUrlOrSrc);
+  }
+
+  // If already a blob URL, fetch and extract blob (governed by connect-src blob:)
+  if (dataUrlOrSrc.startsWith("blob:")) {
     const res = await fetch(dataUrlOrSrc);
     return res.blob();
   }
@@ -116,6 +141,10 @@ export async function toBinaryImageBlob(
   // Headless / non-browser fallback for SVG inputs in tests
   if (dataUrlOrSrc.startsWith("data:image/svg")) {
     return new Blob([MINIMAL_JPEG_BUFFER], { type: "image/jpeg" });
+  }
+
+  if (dataUrlOrSrc.startsWith("data:")) {
+    return dataUrlToBlob(dataUrlOrSrc);
   }
 
   const res = await fetch(dataUrlOrSrc);
