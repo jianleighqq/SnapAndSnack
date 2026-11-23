@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { getCurrentBoothGuest } from "@/lib/booth";
+import { validateBoothSession, SESSION_GRACE_WINDOW_MS } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase-server";
-import { db } from "@/lib/db";
 import { validateImageMagicBytes } from "@/lib/image-convert";
 
 export const dynamic = "force-dynamic";
@@ -52,14 +51,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const context = await getCurrentBoothGuest();
-    if (!context) {
-      return NextResponse.json(
-        { error: "No guest is currently in progress" },
-        { status: 409, headers: { "Cache-Control": "no-store" } }
-      );
-    }
-
     let buffer: Buffer;
     let mimeType: string;
     let mediaType: "PHOTO" | "STRIP" | "GIF";
@@ -117,6 +108,16 @@ export async function POST(request: Request) {
       mimeType = parsed.mimeType;
     }
 
+    // Authorize request by sessionId (accepts IN_PROGRESS or completed within grace window)
+    const auth = await validateBoothSession(sessionId);
+    if (!auth.success) {
+      return NextResponse.json(
+        { error: auth.error, code: auth.code },
+        { status: auth.status, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    const context = auth.context;
+
     if (mediaType !== "PHOTO" && mediaType !== "STRIP" && mediaType !== "GIF") {
       return NextResponse.json(
         { error: "Invalid mediaType: must be PHOTO, STRIP, or GIF" },
@@ -152,24 +153,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolve or verify session ID for this in-progress guest
-    let targetSessionId: string | null | undefined = sessionId;
-    if (!targetSessionId) {
-      const { data: sRows } = await supabaseServer
-        .from("shoot_sessions")
-        .select("id")
-        .eq("queue_id", context.queueEntry.id)
-        .order("started_at", { ascending: false })
-        .limit(1);
-
-      targetSessionId = sRows?.[0]?.id || null;
-    }
-
-    if (!targetSessionId) {
-      // Ensure an active shoot session exists for this guest
-      const session = await db.getOrCreateShootSession(context.queueEntry.id, "PHOTO");
-      targetSessionId = session?.id || null;
-    }
+    const targetSessionId = context.session.id;
 
     // Canonical extension & content type
     const extension = mediaType === "GIF" ? "gif" : "jpg";

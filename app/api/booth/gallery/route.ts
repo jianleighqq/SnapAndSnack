@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentBoothGuest } from "@/lib/booth";
+import { validateBoothSession, SESSION_GRACE_WINDOW_MS } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { supabaseServer } from "@/lib/supabase-server";
@@ -20,44 +20,30 @@ export async function POST(request: Request) {
   }
 
   try {
-    const context = await getCurrentBoothGuest();
-    if (!context) {
-      return NextResponse.json(
-        { error: "No guest is currently in progress" },
-        { status: 409, headers: { "Cache-Control": "no-store" } }
-      );
-    }
-
     const body = await request.json().catch(() => ({}));
     const { sessionId } = body || {};
 
-    // 1. Resolve session ID if not passed directly
-    let resolvedSessionId = sessionId;
-    if (!resolvedSessionId) {
-      const { data: sRows } = await supabaseServer
-        .from("shoot_sessions")
-        .select("id")
-        .eq("queue_id", context.queueEntry.id)
-        .order("started_at", { ascending: false })
-        .limit(1);
-
-      resolvedSessionId = sRows?.[0]?.id || null;
+    const auth = await validateBoothSession(sessionId);
+    if (!auth.success) {
+      return NextResponse.json(
+        { error: auth.error, code: auth.code },
+        { status: auth.status, headers: { "Cache-Control": "no-store" } }
+      );
     }
+    const context = auth.context;
 
-    // 2. Mark media assets in_gallery = true
+    // 2. Mark media assets in_gallery = true strictly for this session
     const result = await db.saveToGallery({
-      sessionId: resolvedSessionId || sessionId,
-      guestId: context.guest.id,
-      eventId: context.event.id,
+      sessionId: context.session.id,
     });
 
     // 3. Confirm at least one media asset is in the gallery
     let hasGalleryAssets = result.success && result.count > 0;
-    if (!hasGalleryAssets && resolvedSessionId) {
+    if (!hasGalleryAssets) {
       const { count: galleryAssetCount } = await supabaseServer
         .from("media_assets")
         .select("id", { count: "exact", head: true })
-        .eq("session_id", resolvedSessionId)
+        .eq("session_id", context.session.id)
         .eq("in_gallery", true);
 
       hasGalleryAssets = (galleryAssetCount || 0) > 0;

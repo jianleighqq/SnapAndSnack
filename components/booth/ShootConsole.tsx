@@ -34,6 +34,42 @@ import { toBinaryImageBlob } from "@/lib/image-convert";
 import type { QueueEntryWithGuest, Event, PhotoTemplate, Pose } from "@/lib/types";
 import QRCode from "qrcode";
 
+/**
+ * Executes a fetch request with up to maxRetries attempts on 409, 429, or 5xx responses,
+ * using exponential backoff with jitter to handle race conditions gracefully.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3,
+  baseDelayMs = 500
+): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      const res = await fetch(url, options);
+      const shouldRetry =
+        (res.status === 409 || res.status === 429 || res.status >= 500) &&
+        attempt < maxRetries;
+      if (!shouldRetry) {
+        return res;
+      }
+      console.warn(
+        `[ShootConsole] Request to ${url} returned ${res.status}. Retrying (${attempt}/${maxRetries})...`
+      );
+    } catch (networkErr) {
+      if (attempt >= maxRetries) throw networkErr;
+      console.warn(
+        `[ShootConsole] Network error for ${url}. Retrying (${attempt}/${maxRetries})...`,
+        networkErr
+      );
+    }
+    const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 150;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
 export type ShootStep = "frame" | "choose" | "countdown" | "preview" | "output";
 export type PreviewMode = "single" | "summary";
 export type BoothStatus = "loading" | "ready" | "no_guest" | "error";
@@ -404,6 +440,11 @@ export default function ShootConsole() {
   ) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      if (!resolvedSessionId) {
+        console.error("[ShootConsole] Cannot upload shot: no sessionId");
+        setSaveToastError("Could not start shoot session");
+        return;
+      }
       const binaryBlob = await toBinaryImageBlob(shot.image, "PHOTO", 800, 600);
 
       const formData = new FormData();
@@ -421,21 +462,22 @@ export default function ShootConsole() {
         )
       );
       if (shot.poseId) formData.append("poseId", shot.poseId);
-      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
+      formData.append("sessionId", resolvedSessionId);
 
-      const res = await fetch("/api/booth/upload", {
+      const res = await fetchWithRetry("/api/booth/upload", {
         method: "POST",
         body: formData,
       });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        console.error("[ShootConsole] Shot upload failed:", errJson);
-        setSaveToastError("Could not save your photos, please try again");
+        const specificError = errJson?.error || `Server error (${res.status})`;
+        console.error("[ShootConsole] Shot upload failed:", specificError);
+        setSaveToastError(`Shot upload failed: ${specificError}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("[ShootConsole] Failed to upload shot to storage:", err);
-      setSaveToastError("Could not save your photos, please try again");
+      setSaveToastError(`Shot upload failed: ${err?.message || "Network error"}`);
     }
   };
 
@@ -443,14 +485,19 @@ export default function ShootConsole() {
   const uploadComposedStrip = async (imageUrl: string) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      if (!resolvedSessionId) {
+        console.error("[ShootConsole] Cannot upload strip: no sessionId");
+        setSaveToastError("Could not start shoot session");
+        return;
+      }
       const binaryBlob = await toBinaryImageBlob(imageUrl, "STRIP", 1200, 1800);
 
       const formData = new FormData();
       formData.append("file", binaryBlob, "strip.jpg");
       formData.append("mediaType", "STRIP");
-      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
+      formData.append("sessionId", resolvedSessionId);
 
-      const res = await fetch("/api/booth/upload", {
+      const res = await fetchWithRetry("/api/booth/upload", {
         method: "POST",
         body: formData,
       });
@@ -462,12 +509,13 @@ export default function ShootConsole() {
         }
       } else {
         const errJson = await res.json().catch(() => ({}));
-        console.error("[ShootConsole] Strip upload failed:", errJson);
-        setSaveToastError("Could not save your photos, please try again");
+        const specificError = errJson?.error || `Server error (${res.status})`;
+        console.error("[ShootConsole] Strip upload failed:", specificError);
+        setSaveToastError(`Strip upload failed: ${specificError}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("[ShootConsole] Failed to upload composed strip to storage:", err);
-      setSaveToastError("Could not save your photos, please try again");
+      setSaveToastError(`Strip upload failed: ${err?.message || "Network error"}`);
     }
   };
 
@@ -475,21 +523,27 @@ export default function ShootConsole() {
   const uploadGif = async (imageUrl: string) => {
     try {
       const resolvedSessionId = await ensureSessionId();
+      if (!resolvedSessionId) {
+        console.error("[ShootConsole] Cannot upload GIF: no sessionId");
+        setGifStatus("error");
+        return;
+      }
       const binaryBlob = await toBinaryImageBlob(imageUrl, "GIF");
 
       const formData = new FormData();
       formData.append("file", binaryBlob, "animation.gif");
       formData.append("mediaType", "GIF");
-      if (resolvedSessionId) formData.append("sessionId", resolvedSessionId);
+      formData.append("sessionId", resolvedSessionId);
 
-      const res = await fetch("/api/booth/upload", {
+      const res = await fetchWithRetry("/api/booth/upload", {
         method: "POST",
         body: formData,
       });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        console.error("[ShootConsole] GIF upload failed:", errJson?.error || errJson);
+        const specificError = errJson?.error || `Server error (${res.status})`;
+        console.error("[ShootConsole] GIF upload failed:", specificError);
         setGifStatus("error");
       }
     } catch (err: any) {
@@ -861,7 +915,11 @@ export default function ShootConsole() {
 
     try {
       // 1. Verify print limit on the server before hardware print
-      const checkRes = await fetch("/api/booth/print", { cache: "no-store" });
+      const resolvedSessionId = sessionIdRef.current || sessionId;
+      const checkUrl = resolvedSessionId
+        ? `/api/booth/print?sessionId=${encodeURIComponent(resolvedSessionId)}`
+        : "/api/booth/print";
+      const checkRes = await fetch(checkUrl, { cache: "no-store" });
       if (checkRes.ok) {
         const checkData = await checkRes.json();
         if (!checkData.canPrint) {
@@ -888,10 +946,11 @@ export default function ShootConsole() {
 
       if (result.success) {
         // 3. Record successful print job
-        const recordRes = await fetch("/api/booth/print", {
+        const recordRes = await fetchWithRetry("/api/booth/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            sessionId: resolvedSessionId,
             mediaId: stripMediaAssetId || undefined,
             status: "PRINTED",
           }),
@@ -907,10 +966,11 @@ export default function ShootConsole() {
         setPrintMessage("Printed");
       } else {
         // 4. Record FAILED print job (does NOT count toward limit)
-        await fetch("/api/booth/print", {
+        await fetchWithRetry("/api/booth/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            sessionId: resolvedSessionId,
             mediaId: stripMediaAssetId || undefined,
             status: "FAILED",
           }),
@@ -966,7 +1026,13 @@ export default function ShootConsole() {
 
       // 3. Mark in_gallery = true via backend API
       const currentSessionId = await ensureSessionId();
-      const res = await fetch("/api/booth/gallery", {
+      if (!currentSessionId) {
+        setGalleryStatus("failed");
+        setSaveToastError("Gallery sync failed: No active shoot session");
+        return;
+      }
+
+      const res = await fetchWithRetry("/api/booth/gallery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -976,9 +1042,10 @@ export default function ShootConsole() {
 
       if (!res.ok) {
         const resJson = await res.json().catch(() => ({}));
-        console.error("[ShootConsole] Auto-publish to gallery error:", resJson);
+        const specificError = resJson?.error || `Server error (${res.status})`;
+        console.error("[ShootConsole] Auto-publish to gallery error:", specificError);
         setGalleryStatus("failed");
-        setSaveToastError("Gallery sync failed");
+        setSaveToastError(`Gallery sync failed: ${specificError}`);
         return;
       }
 
@@ -987,7 +1054,7 @@ export default function ShootConsole() {
     } catch (err: any) {
       console.error("[ShootConsole] Auto-publish to gallery exception:", err);
       setGalleryStatus("failed");
-      setSaveToastError("Gallery sync failed");
+      setSaveToastError(`Gallery sync failed: ${err?.message || "Network error"}`);
     }
   };
 
@@ -1007,10 +1074,14 @@ export default function ShootConsole() {
   const handleFinishDone = async () => {
     hardware.stopStream?.();
     setIsFinishing(true);
+    const resolvedSessionId = sessionIdRef.current || sessionId;
     try {
-      await fetch("/api/booth/finish", {
+      await fetchWithRetry("/api/booth/finish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: resolvedSessionId,
+        }),
       });
     } catch (err) {
       console.warn("Could not mark completed in API:", err);

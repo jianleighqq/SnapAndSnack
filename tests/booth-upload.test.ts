@@ -170,3 +170,138 @@ test("Idempotent update logic prevents duplicate rows on Retry Save", () => {
   assert.strictEqual(mockTable[0].storage_path, "path/shot-1-retry.jpg");
   assert.strictEqual(mockTable[3].storage_path, "path/strip-retry.jpg");
 });
+
+test("Session authorization rule: authorizes IN_PROGRESS and recently completed within 15m grace window", () => {
+  const SESSION_GRACE_WINDOW_MS = 15 * 60 * 1000;
+  const activeEventId = "active-event-1";
+
+  function evaluateSessionAuth(params: {
+    sessionId?: string | null;
+    session?: { id: string; event_id: string; ended_at?: string | null; started_at?: string } | null;
+    queueEntry?: { status: string } | null;
+    nowMs: number;
+  }): { authorized: boolean; code?: string } {
+    const { sessionId, session, queueEntry, nowMs } = params;
+    if (!sessionId || !UUID_REGEX.test(sessionId)) {
+      return { authorized: false, code: "INVALID_SESSION_ID" };
+    }
+    if (!session) {
+      return { authorized: false, code: "SESSION_NOT_FOUND" };
+    }
+    if (session.event_id !== activeEventId) {
+      return { authorized: false, code: "EVENT_MISMATCH" };
+    }
+    if (!queueEntry) {
+      return { authorized: false, code: "QUEUE_ENTRY_NOT_FOUND" };
+    }
+
+    if (queueEntry.status === "IN_PROGRESS") {
+      return { authorized: true };
+    }
+
+    let endedAtTime: number | null = null;
+    if (session.ended_at) {
+      endedAtTime = new Date(session.ended_at).getTime();
+    } else if (queueEntry.status === "COMPLETED" && session.started_at) {
+      endedAtTime = new Date(session.started_at).getTime();
+    }
+
+    if (endedAtTime !== null && !isNaN(endedAtTime)) {
+      const elapsedMs = nowMs - endedAtTime;
+      const withinGrace = elapsedMs <= SESSION_GRACE_WINDOW_MS && elapsedMs >= -60_000;
+      if (withinGrace) {
+        return { authorized: true };
+      }
+      return { authorized: false, code: "SESSION_EXPIRED" };
+    }
+
+    return { authorized: false, code: "SESSION_INACTIVE" };
+  }
+
+  const now = 1700000000000;
+  const validSessionId = "11111111-2222-3333-4444-555555555555";
+
+  // 1. Rejects invalid session ID
+  assert.deepStrictEqual(evaluateSessionAuth({ sessionId: "bad-id", nowMs: now }), {
+    authorized: false,
+    code: "INVALID_SESSION_ID",
+  });
+
+  // 2. Rejects session from another event
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: { id: validSessionId, event_id: "other-event", ended_at: null },
+      queueEntry: { status: "IN_PROGRESS" },
+      nowMs: now,
+    }),
+    { authorized: false, code: "EVENT_MISMATCH" }
+  );
+
+  // 3. Accepts active IN_PROGRESS guest
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: { id: validSessionId, event_id: activeEventId, ended_at: null },
+      queueEntry: { status: "IN_PROGRESS" },
+      nowMs: now,
+    }),
+    { authorized: true }
+  );
+
+  // 4. Accepts completed guest 2 minutes after session ended (within 15m window)
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: {
+        id: validSessionId,
+        event_id: activeEventId,
+        ended_at: new Date(now - 2 * 60 * 1000).toISOString(),
+      },
+      queueEntry: { status: "COMPLETED" },
+      nowMs: now,
+    }),
+    { authorized: true }
+  );
+
+  // 5. Accepts completed guest 14.5 minutes after session ended (within 15m window)
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: {
+        id: validSessionId,
+        event_id: activeEventId,
+        ended_at: new Date(now - 14.5 * 60 * 1000).toISOString(),
+      },
+      queueEntry: { status: "COMPLETED" },
+      nowMs: now,
+    }),
+    { authorized: true }
+  );
+
+  // 6. Rejects completed guest 16 minutes after session ended (outside 15m window)
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: {
+        id: validSessionId,
+        event_id: activeEventId,
+        ended_at: new Date(now - 16 * 60 * 1000).toISOString(),
+      },
+      queueEntry: { status: "COMPLETED" },
+      nowMs: now,
+    }),
+    { authorized: false, code: "SESSION_EXPIRED" }
+  );
+
+  // 7. Rejects cancelled guest
+  assert.deepStrictEqual(
+    evaluateSessionAuth({
+      sessionId: validSessionId,
+      session: { id: validSessionId, event_id: activeEventId, ended_at: null },
+      queueEntry: { status: "CANCELLED" },
+      nowMs: now,
+    }),
+    { authorized: false, code: "SESSION_INACTIVE" }
+  );
+});

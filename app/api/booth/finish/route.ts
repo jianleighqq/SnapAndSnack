@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentBoothGuest } from "@/lib/booth";
+import { validateBoothSession, SESSION_GRACE_WINDOW_MS } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 
@@ -18,11 +18,32 @@ export async function POST(request: Request) {
   }
 
   try {
-    const context = await getCurrentBoothGuest();
-    if (!context) {
+    const body = await request.json().catch(() => ({}));
+    const { sessionId } = body || {};
+
+    const auth = await validateBoothSession(sessionId);
+    if (!auth.success) {
       return NextResponse.json(
-        { error: "No guest is currently in progress" },
-        { status: 409, headers: { "Cache-Control": "no-store" } }
+        { error: auth.error, code: auth.code },
+        { status: auth.status, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    const context = auth.context;
+
+    // Idempotent completion: if already finished or completed, return success
+    if (context.queueEntry.status === "COMPLETED") {
+      return NextResponse.json(
+        {
+          success: true,
+          finished: null,
+          alreadyFinished: true,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            "X-RateLimit-Remaining": String(rateLimit.remaining),
+          },
+        }
       );
     }
 

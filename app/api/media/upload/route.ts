@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 import { validateImageMagicBytes } from "@/lib/image-convert";
 import { requireOperatorSession } from "@/lib/auth-server";
-import { getCurrentBoothGuest } from "@/lib/booth";
+import { validateBoothSession, SESSION_GRACE_WINDOW_MS } from "@/lib/booth";
 import { checkBoothRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -52,34 +52,72 @@ export async function POST(request: Request) {
     );
   }
 
-  // 2. Authorization: operator session or active booth guest
+  // 2. Authorization: operator session or valid booth shoot session
   const isOperator = await requireOperatorSession(request);
-  const boothContext = !isOperator ? await getCurrentBoothGuest() : null;
-  if (!isOperator && !boothContext) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401, headers: { "Cache-Control": "no-store" } }
-    );
-  }
 
   try {
     const body = await request.json();
     const {
       image,
-      eventId,
-      guestId,
       sessionId,
-      queueId,
       mediaType,
       shotNumber,
       retakeCount,
       poseId,
-    } = body;
+    } = body || {};
 
-    console.log(`[Upload] Processing ${mediaType} upload for guest ${guestId}, event ${eventId}, session ${sessionId}`);
+    let targetSessionId = sessionId;
+    let targetEventId: string;
+    let targetGuestId: string;
 
-    if (!image || !eventId || !guestId || !mediaType) {
-      console.error("[Upload] Missing required parameters:", { eventId, guestId, mediaType, hasImage: !!image });
+    if (!isOperator) {
+      const auth = await validateBoothSession(sessionId);
+      if (!auth.success) {
+        return NextResponse.json(
+          { error: auth.error, code: auth.code },
+          { status: auth.status, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+      targetSessionId = auth.context.session.id;
+      targetEventId = auth.context.event.id;
+      targetGuestId = auth.context.guest.id;
+    } else {
+      targetEventId = body.eventId;
+      targetGuestId = body.guestId;
+      if (!targetEventId || !targetGuestId) {
+        return NextResponse.json(
+          { error: "Missing required parameters (eventId, guestId)" },
+          { status: 400 }
+        );
+      }
+      if (!targetSessionId || !UUID_REGEX.test(targetSessionId)) {
+        // Find latest open session for this guest
+        const { data: qRows } = await supabaseServer
+          .from("queue_entries")
+          .select("id")
+          .eq("guest_id", targetGuestId)
+          .eq("event_id", targetEventId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const resolvedQueueId = body.queueId || qRows?.[0]?.id;
+        if (resolvedQueueId) {
+          const { data: sRows } = await supabaseServer
+            .from("shoot_sessions")
+            .select("id")
+            .eq("queue_id", resolvedQueueId)
+            .order("started_at", { ascending: false })
+            .limit(1);
+
+          targetSessionId = sRows?.[0]?.id || null;
+        }
+      }
+    }
+
+    console.log(`[Upload] Processing ${mediaType} upload for guest ${targetGuestId}, event ${targetEventId}, session ${targetSessionId}`);
+
+    if (!image || !targetEventId || !targetGuestId || !mediaType) {
+      console.error("[Upload] Missing required parameters:", { eventId: targetEventId, guestId: targetGuestId, mediaType, hasImage: !!image });
       return NextResponse.json(
         { error: "Missing required parameters (image, eventId, guestId, mediaType)" },
         { status: 400 }
@@ -94,33 +132,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 1. Resolve session ID if not provided or stale
-    let targetSessionId = sessionId;
-    if (!targetSessionId || !UUID_REGEX.test(targetSessionId)) {
-      // Find latest open session for this guest
-      const { data: qRows } = await supabaseServer
-        .from("queue_entries")
-        .select("id")
-        .eq("guest_id", guestId)
-        .eq("event_id", eventId)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      const resolvedQueueId = queueId || qRows?.[0]?.id;
-      if (resolvedQueueId) {
-        const { data: sRows } = await supabaseServer
-          .from("shoot_sessions")
-          .select("id")
-          .eq("queue_id", resolvedQueueId)
-          .order("started_at", { ascending: false })
-          .limit(1);
-
-        targetSessionId = sRows?.[0]?.id || null;
-      }
-    }
-
     if (!targetSessionId) {
-      console.error("[Upload] Could not resolve session for upload:", { guestId, eventId, queueId });
+      console.error("[Upload] Could not resolve session for upload:", { guestId: targetGuestId, eventId: targetEventId });
       return NextResponse.json(
         { error: "Active shoot session not found for this guest" },
         { status: 404 }
@@ -161,10 +174,10 @@ export async function POST(request: Request) {
     // 3. Storage path: {event_id}/{guest_id}/shot-{shot_number}.jpg, strip.jpg, or animation.gif
     const storagePath =
       mediaType === "PHOTO"
-        ? `${eventId}/${guestId}/shot-${shotNumber || 1}.jpg`
+        ? `${targetEventId}/${targetGuestId}/shot-${shotNumber || 1}.jpg`
         : mediaType === "GIF"
-        ? `${eventId}/${guestId}/animation.gif`
-        : `${eventId}/${guestId}/strip.jpg`;
+        ? `${targetEventId}/${targetGuestId}/animation.gif`
+        : `${targetEventId}/${targetGuestId}/strip.jpg`;
 
     const storageContentType = mediaType === "GIF" ? "image/gif" : "image/jpeg";
 
