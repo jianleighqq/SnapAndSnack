@@ -4,6 +4,7 @@ import { sendGuestPush, logGuestAlert } from "@/lib/push";
 import { requireOperatorSession } from "@/lib/auth-server";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { queueActionSchema } from "@/lib/validations";
+import { sendRegistrationEmail, maskEmail } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -104,11 +105,84 @@ export async function POST(request: Request) {
             { status: 400, headers: { "Cache-Control": "no-store" } }
           );
         }
-        await db.addGuest({
+
+        const cleanEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+        const addResult = await db.addGuest({
           fullName: fullName.trim(),
-          email: typeof email === "string" ? email.trim().toLowerCase() : "",
+          email: cleanEmail,
         });
-        break;
+
+        const guest = addResult.guest;
+        const queueEntry = addResult.queueEntry;
+        const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+        const ticketUrl = `${baseUrl}/guest?token=${encodeURIComponent(guest.guest_token)}`;
+
+        let emailSent = false;
+        if (cleanEmail && cleanEmail.includes("@")) {
+          try {
+            const activeEvent = await db.getActiveEvent();
+            const firstName = guest.full_name?.split(/\s+/)[0] || "Guest";
+            const emailPromise = sendRegistrationEmail({
+              to: cleanEmail,
+              firstName,
+              queueNumber: queueEntry.queue_number,
+              eventName: activeEvent?.name || "Snap & Snack Event",
+              guestToken: guest.guest_token,
+            });
+
+            const timeoutPromise = new Promise<{ success: false; error: string }>((resolve) =>
+              setTimeout(() => resolve({ success: false, error: "Email delivery timeout" }), 8000)
+            );
+
+            const emailResult = await Promise.race([emailPromise, timeoutPromise]);
+            emailSent = emailResult.success;
+            if (!emailResult.success) {
+              console.warn(
+                `[Queue API] Registration email not sent to ${maskEmail(cleanEmail)}:`,
+                emailResult.error || "delivery failed"
+              );
+            }
+          } catch (emailErr: any) {
+            console.warn(
+              `[Queue API] Registration email error for ${maskEmail(cleanEmail)}:`,
+              emailErr?.message || emailErr
+            );
+            emailSent = false;
+          }
+        }
+
+        const { event, queue } = await db.getActiveEventWithQueue();
+        const sanitizedQueue = (queue || []).map((entry) => ({
+          ...entry,
+          guest: {
+            ...entry.guest,
+            guest_token: "",
+          },
+        }));
+
+        return NextResponse.json(
+          {
+            success: true,
+            created: {
+              guest: {
+                id: guest.id,
+                full_name: guest.full_name,
+                email: cleanEmail,
+                guest_token: guest.guest_token,
+              },
+              queueEntry,
+              ticketUrl,
+              emailSent,
+            },
+            event,
+            queue: sanitizedQueue,
+          },
+          {
+            headers: {
+              "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
+          }
+        );
       }
 
       case "start":

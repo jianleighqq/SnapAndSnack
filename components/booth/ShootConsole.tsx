@@ -8,7 +8,6 @@ import {
   Check,
   Printer,
   QrCode,
-  CloudUpload,
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
@@ -926,8 +925,8 @@ export default function ShootConsole() {
     }
   };
 
-  // Step 4: Save to Gallery action
-  const handleSaveToGallery = async () => {
+  // Step 5: Automatically publish session media to gallery
+  const handleAutoPublishGallery = async () => {
     if (galleryStatus === "working" || galleryStatus === "done") return;
     setGalleryStatus("working");
     setSaveToastError(null);
@@ -959,18 +958,8 @@ export default function ShootConsole() {
         await uploadComposedStrip(currentStrip);
       }
 
-      // 2b. Ensure animated GIF is uploaded if enabled
-      let currentGif = gifDataUrlRef.current || gifDataUrl;
-      if (!currentGif && shouldMakeGif) {
-        for (let i = 0; i < 50; i++) {
-          if (gifDataUrlRef.current) {
-            currentGif = gifDataUrlRef.current;
-            break;
-          }
-          if ((gifStatusRef.current as string) === "error") break;
-          await new Promise((r) => setTimeout(r, 100));
-        }
-      }
+      // 2b. Ensure animated GIF is uploaded if ready
+      const currentGif = gifDataUrlRef.current || gifDataUrl;
       if (currentGif) {
         await uploadGif(currentGif);
       }
@@ -985,23 +974,34 @@ export default function ShootConsole() {
         }),
       });
 
-      const resJson = await res.json().catch(() => ({}));
-
-      if (!res.ok || resJson.count === 0) {
-        console.error("[ShootConsole] Save to gallery returned error or 0 count:", resJson);
+      if (!res.ok) {
+        const resJson = await res.json().catch(() => ({}));
+        console.error("[ShootConsole] Auto-publish to gallery error:", resJson);
         setGalleryStatus("failed");
-        setSaveToastError("Could not save your photos, please try again");
+        setSaveToastError("Gallery sync failed");
         return;
       }
 
       setGalleryStatus("done");
       setSaveToastError(null);
     } catch (err: any) {
-      console.error("[ShootConsole] Save to gallery exception:", err);
+      console.error("[ShootConsole] Auto-publish to gallery exception:", err);
       setGalleryStatus("failed");
-      setSaveToastError("Could not save your photos, please try again");
+      setSaveToastError("Gallery sync failed");
     }
   };
+
+  const handleRetryPublish = () => {
+    setGalleryStatus("idle");
+    setSaveToastError(null);
+  };
+
+  // Trigger automatic gallery publish as soon as Collect screen (step 5) is reached
+  useEffect(() => {
+    if (step === "output" && galleryStatus === "idle") {
+      handleAutoPublishGallery();
+    }
+  }, [step, galleryStatus]);
 
   // Step 4: Mark COMPLETED and return to attract screen
   const handleFinishDone = async () => {
@@ -1182,13 +1182,20 @@ export default function ShootConsole() {
 
       {/* SAVE / UPLOAD ERROR FLOATING TOAST */}
       {saveToastError && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full bg-danger text-white text-xs font-mono shadow-xl animate-fadeIn">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-full bg-danger text-white text-xs font-mono shadow-xl animate-fadeIn">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{saveToastError}</span>
           <button
             type="button"
+            onClick={handleRetryPublish}
+            className="underline uppercase font-bold hover:opacity-90 tracking-wider text-[11px] px-1"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
             onClick={() => setSaveToastError(null)}
-            className="ml-2 hover:opacity-80 p-0.5 rounded-full"
+            className="hover:opacity-80 p-0.5 rounded-full"
             aria-label="Dismiss error"
           >
             <X className="h-3.5 w-3.5" />
@@ -2077,8 +2084,8 @@ export default function ShootConsole() {
                 )}
               </div>
 
-              {/* Three Output Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 h-full max-h-none md:max-h-[46vh] items-stretch min-w-0">
+              {/* Output Actions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 h-full max-h-none md:max-h-[46vh] items-stretch min-w-0">
                 {/* PRINT ACTION */}
                 <Tile
                   tone="surface"
@@ -2171,69 +2178,6 @@ export default function ShootConsole() {
                       <QrCode className="h-4 w-4 shrink-0" />
                       <span>{showQrTile ? "Hide QR" : "Show QR"}</span>
                     </Pill>
-                  </div>
-                </Tile>
-
-                {/* SAVE TO GALLERY ACTION */}
-                <Tile
-                  tone="surface"
-                  className="flex flex-col items-center justify-between p-3 sm:p-4 text-center rounded-tile border border-ink/5 min-w-0"
-                >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper text-ink mb-1 shrink-0">
-                    <CloudUpload className="h-5 w-5 text-accent" />
-                  </div>
-                  <div>
-                    <h3 className="font-display text-base uppercase tracking-wide">Event Gallery</h3>
-                    <p className="text-[11px] text-muted mt-0.5">Cloud photo gallery sync.</p>
-                  </div>
-
-                  <div className="w-full mt-2">
-                    {galleryStatus === "idle" && (
-                      <Pill
-                        variant="secondary"
-                        size="md"
-                        onClick={handleSaveToGallery}
-                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
-                      >
-                        <CloudUpload className="h-4 w-4 shrink-0" />
-                        <span>Save to Gallery</span>
-                      </Pill>
-                    )}
-
-                    {galleryStatus === "working" && (
-                      <Pill
-                        variant="secondary"
-                        size="md"
-                        disabled
-                        className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight"
-                      >
-                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                        <span>Saving...</span>
-                      </Pill>
-                    )}
-
-                    {galleryStatus === "done" && (
-                      <div className="inline-flex min-h-[44px] items-center justify-center gap-1.5 w-full text-[11px] sm:text-xs font-mono font-bold text-success uppercase">
-                        <Check className="h-4 w-4 shrink-0" /> Saved
-                      </div>
-                    )}
-
-                    {galleryStatus === "failed" && (
-                      <div className="flex flex-col items-center gap-1.5 w-full">
-                        <div className="inline-flex items-center justify-center gap-1.5 w-full text-[11px] sm:text-xs font-mono font-bold text-danger uppercase">
-                          <AlertTriangle className="h-4 w-4 shrink-0" /> Save Failed
-                        </div>
-                        <Pill
-                          variant="secondary"
-                          size="md"
-                          onClick={handleSaveToGallery}
-                          className="w-full uppercase font-mono text-[11px] sm:text-xs tracking-normal sm:tracking-[0.02em] min-h-[44px] px-2 sm:px-3 whitespace-normal break-words leading-tight text-danger border-danger/30 hover:bg-danger/10"
-                        >
-                          <CloudUpload className="h-4 w-4 shrink-0" />
-                          <span>Retry Save</span>
-                        </Pill>
-                      </div>
-                    )}
                   </div>
                 </Tile>
               </div>

@@ -106,6 +106,7 @@ export interface ShootSession {
   template_id?: string | null;
   started_at: string;
   ended_at: string | null;
+  photos_notified_at?: string | null;
 }
 
 export interface Pose {
@@ -132,7 +133,7 @@ export interface AlertLog {
   id?: string;
   event_id: string;
   guest_id: string;
-  alert_type: "GET_READY" | "YOUR_TURN";
+  alert_type: "GET_READY" | "YOUR_TURN" | "PHOTOS_READY";
   sent_at?: string;
 }
 

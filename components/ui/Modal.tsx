@@ -65,6 +65,13 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerElementRef = useRef<HTMLElement | null>(null);
 
+  // Stable ref for onClose so re-renders of parent during typing don't trigger focus/listener effects
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Track previous isOpen state so focus logic ONLY runs on the false -> true transition
+  const prevIsOpenRef = useRef(false);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -79,37 +86,68 @@ export function Modal({
     };
   }, [isOpen]);
 
-  // Focus management & keyboard shortcuts
+  // Focus management: runs ONCE when isOpen transitions false -> true, and restores on true -> false
+  useEffect(() => {
+    if (!isOpen) {
+      if (prevIsOpenRef.current) {
+        // Modal was closed: restore focus to opening trigger element
+        if (triggerElementRef.current && typeof triggerElementRef.current.focus === "function") {
+          triggerElementRef.current.focus();
+        }
+      }
+      prevIsOpenRef.current = false;
+      return;
+    }
+
+    // Modal is opening (only execute if it was previously not open)
+    if (!prevIsOpenRef.current) {
+      prevIsOpenRef.current = true;
+      // Capture the trigger element before focus moves into the modal
+      triggerElementRef.current = document.activeElement as HTMLElement | null;
+
+      const focusTimer = setTimeout(() => {
+        if (!dialogRef.current) return;
+
+        // 1. Prioritize element with autofocus / data-autofocus attribute
+        const autoFocusEl = dialogRef.current.querySelector<HTMLElement>(
+          "[autofocus], [data-autofocus]"
+        );
+        if (autoFocusEl && typeof autoFocusEl.focus === "function") {
+          autoFocusEl.focus();
+          return;
+        }
+
+        // 2. Otherwise focus the first focusable element
+        const focusableSelectors =
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(focusableSelectors)
+        ).filter(
+          (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true"
+        );
+
+        if (focusables.length > 0) {
+          focusables[0].focus();
+        } else {
+          dialogRef.current.focus();
+        }
+      }, 30);
+
+      return () => {
+        clearTimeout(focusTimer);
+      };
+    }
+  }, [isOpen]);
+
+  // Keyboard navigation & Tab trapping inside dialog
   useEffect(() => {
     if (!isOpen) return;
-
-    // Save previous active element to restore focus when dialog closes
-    triggerElementRef.current = document.activeElement as HTMLElement | null;
-
-    // Focus the first focusable element or the dialog wrapper
-    const focusTimer = setTimeout(() => {
-      if (!dialogRef.current) return;
-
-      const focusableSelectors =
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-      const focusables = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(focusableSelectors)
-      ).filter(
-        (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true"
-      );
-
-      if (focusables.length > 0) {
-        focusables[0].focus();
-      } else {
-        dialogRef.current.focus();
-      }
-    }, 30);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Esc to close
       if (e.key === "Escape" && closeOnEsc) {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -146,17 +184,10 @@ export function Modal({
     };
 
     window.addEventListener("keydown", handleKeyDown);
-
     return () => {
-      clearTimeout(focusTimer);
       window.removeEventListener("keydown", handleKeyDown);
-
-      // Return focus to trigger element when dialog closes
-      if (triggerElementRef.current && typeof triggerElementRef.current.focus === "function") {
-        triggerElementRef.current.focus();
-      }
     };
-  }, [isOpen, closeOnEsc, onClose]);
+  }, [isOpen, closeOnEsc]);
 
   if (!isOpen || !mounted || typeof document === "undefined") {
     return null;
@@ -179,7 +210,7 @@ export function Modal({
       onClick={(e) => {
         // Only trigger close when clicking the backdrop itself
         if (e.target === e.currentTarget && closeOnBackdropClick) {
-          onClose();
+          onCloseRef.current();
         }
       }}
     >
@@ -188,4 +219,5 @@ export function Modal({
     document.body
   );
 }
+
 export default Modal;

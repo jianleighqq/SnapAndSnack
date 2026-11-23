@@ -164,17 +164,6 @@ export default function QueueCustomerModal({
           className="relative w-full max-w-lg rounded-tile bg-paper p-4 sm:p-6 text-ink shadow-xl max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Close Button */}
-          <Pill
-            variant="secondary"
-            size="icon"
-            onClick={onClose}
-            aria-label="Close modal"
-            className="absolute right-4 top-4"
-          >
-            <X className="h-4 w-4" />
-          </Pill>
-
           {/* Header with Queue # and Name */}
           <div className="flex items-start gap-4 pr-10">
             <div
@@ -371,6 +360,17 @@ export default function QueueCustomerModal({
               )}
             </div>
           )}
+
+          {/* Close Button in DOM order after actions */}
+          <Pill
+            variant="secondary"
+            size="icon"
+            onClick={onClose}
+            aria-label="Close modal"
+            className="absolute right-4 top-4"
+          >
+            <X className="h-4 w-4" />
+          </Pill>
         </div>
       </Modal>
 
@@ -385,16 +385,6 @@ export default function QueueCustomerModal({
           className="relative w-full max-w-xs rounded-tile bg-paper p-5 sm:p-6 text-ink shadow-2xl text-center max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
-          <Pill
-            variant="secondary"
-            size="icon"
-            onClick={() => setShowQrModal(false)}
-            aria-label="Close QR code"
-            className="absolute right-4 top-4"
-          >
-            <X className="h-4 w-4" />
-          </Pill>
-
           <div className="mb-2">
             <Label className="block mb-1">Guest Ticket QR</Label>
             <h3 className="font-display text-xl uppercase tracking-tight text-ink">
@@ -425,7 +415,7 @@ export default function QueueCustomerModal({
             variant={isCopied ? "secondary" : "primary"}
             onClick={handleCopyTicketLink}
             className={cn(
-              "w-full justify-center gap-1.5",
+              "w-full justify-center gap-1.5 mb-2",
               isCopied && "border-ok/40 bg-ok/10 text-ok"
             )}
           >
@@ -440,6 +430,16 @@ export default function QueueCustomerModal({
                 <span>Copy Ticket Link</span>
               </>
             )}
+          </Pill>
+
+          <Pill
+            variant="secondary"
+            size="icon"
+            onClick={() => setShowQrModal(false)}
+            aria-label="Close QR code"
+            className="absolute right-4 top-4"
+          >
+            <X className="h-4 w-4" />
           </Pill>
         </div>
       </Modal>

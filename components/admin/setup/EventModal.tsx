@@ -119,17 +119,6 @@ export default function EventModal({
     }
   };
 
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -182,21 +171,13 @@ export default function EventModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between pb-3">
+        <div className="flex items-center justify-between pb-3 pr-10">
           <div>
             <Label>{isEditing ? "Edit event" : "New event"}</Label>
             <h2 id="event-modal-title" className="font-display text-3xl uppercase tracking-tight text-ink mt-1">
               {isEditing ? "Edit Event" : "Create New Event"}
             </h2>
           </div>
-          <Pill
-            variant="secondary"
-            size="icon"
-            onClick={onClose}
-            aria-label="Close dialog"
-          >
-            <X className="h-4 w-4" />
-          </Pill>
         </div>
 
         <Hairline className="my-4" />
@@ -218,6 +199,7 @@ export default function EventModal({
               id="event-name"
               type="text"
               required
+              autoFocus
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
               placeholder="e.g. Sam's 30th Birthday"
@@ -518,6 +500,17 @@ export default function EventModal({
             </Pill>
           </div>
         </form>
+
+        {/* Close Button: tab order is after submit, visually top-right */}
+        <Pill
+          variant="secondary"
+          size="icon"
+          onClick={onClose}
+          aria-label="Close dialog"
+          className="absolute right-4 top-4 sm:right-6 sm:top-6"
+        >
+          <X className="h-4 w-4" />
+        </Pill>
       </div>
     </Modal>
   );

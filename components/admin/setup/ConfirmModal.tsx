@@ -46,7 +46,7 @@ export default function ConfirmModal({
         className="w-full max-w-md rounded-tile bg-paper p-4 sm:p-6 text-ink relative shadow-xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between pb-3">
+        <div className="flex items-start justify-between pb-3 pr-10">
           <div className="flex items-center gap-2">
             {variant === "danger" ? (
               <AlertTriangle className="h-5 w-5 text-danger shrink-0" />
@@ -59,15 +59,6 @@ export default function ConfirmModal({
               {title}
             </h2>
           </div>
-          <Pill
-            variant="secondary"
-            size="icon"
-            onClick={onClose}
-            disabled={isLoading}
-            aria-label="Close confirmation dialog"
-          >
-            <X className="h-4 w-4" />
-          </Pill>
         </div>
 
         <Hairline className="my-3" />
@@ -95,10 +86,23 @@ export default function ConfirmModal({
             variant={pillVariant}
             onClick={onConfirm}
             disabled={isLoading}
+            autoFocus
           >
             {isLoading ? "Processing..." : confirmLabel}
           </Pill>
         </div>
+
+        {/* Close Button in DOM order after action buttons */}
+        <Pill
+          variant="secondary"
+          size="icon"
+          onClick={onClose}
+          disabled={isLoading}
+          aria-label="Close confirmation dialog"
+          className="absolute right-4 top-4"
+        >
+          <X className="h-4 w-4" />
+        </Pill>
       </div>
     </Modal>
   );

@@ -115,7 +115,99 @@ ${ticketUrl}
   return { subject, text, html };
 }
 
-function maskEmail(email: string): string {
+export interface SendPhotosReadyOptions {
+  to: string;
+  firstName: string;
+  eventName: string;
+  guestToken: string;
+}
+
+/**
+ * Builds the editorial-style "Photos Ready" email content.
+ */
+export function buildPhotosReadyEmailContent(options: {
+  firstName: string;
+  eventName: string;
+  guestToken: string;
+}) {
+  const { firstName, eventName, guestToken } = options;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const galleryUrl = `${baseUrl}/gallery?token=${guestToken}`;
+
+  const subject = `Your photos are ready! · ${eventName}`;
+
+  const text = `Hi ${firstName},
+
+Your photo booth pictures from ${eventName} are ready to view and download!
+
+Open your gallery:
+${galleryUrl}
+
+- Snap & Snack`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f6f4f1; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #161513;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f6f4f1; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; background-color: #f6f4f1;">
+          <tr>
+            <td style="padding-bottom: 24px;">
+              <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 900; font-size: 20px; letter-spacing: 2px; text-transform: uppercase; color: #161513;">
+                Snap &amp; Snack
+              </span>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color: #ecebe7; border-radius: 20px; padding: 32px 28px; text-align: left;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; line-height: 1.5; color: #161513;">
+                Hi <strong>${firstName}</strong>,
+              </p>
+              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.5; color: #73706b;">
+                Your photos from <strong>${eventName}</strong> have been published to your personal gallery.
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="${galleryUrl}" target="_blank" style="display: inline-block; background-color: #161513; color: #f6f4f1; text-decoration: none; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; padding: 14px 32px; border-radius: 9999px;">
+                      View my photos
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #73706b; text-align: center; word-break: break-all;">
+                Or copy your gallery link: <a href="${galleryUrl}" style="color: #e8541e; text-decoration: none;">${galleryUrl}</a>
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding-top: 24px; text-align: center; font-size: 11px; color: #73706b;">
+              <span style="font-family: monospace; text-transform: uppercase; letter-spacing: 1px;">
+                Snap &amp; Snack · Photo Booth
+              </span>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, text, html };
+}
+
+export function maskEmail(email: string): string {
   if (!email || typeof email !== "string") return "***";
   const parts = email.split("@");
   if (parts.length !== 2) return "***";
@@ -223,4 +315,84 @@ export async function sendTestEmail(to: string, eventName?: string): Promise<Ema
     eventName: eventName || "Snap & Snack Event",
     guestToken: "test-token-sample-preview",
   });
+}
+
+/**
+ * Dispatches a "Photos Ready" notification email with personal gallery link.
+ * Never throws: errors are logged server-side and returned cleanly.
+ */
+export async function sendPhotosReadyEmail(options: SendPhotosReadyOptions): Promise<EmailResult> {
+  const { to, firstName, eventName, guestToken } = options;
+  const content = buildPhotosReadyEmailContent({ firstName, eventName, guestToken });
+
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const fromAddress = process.env.EMAIL_FROM || (smtpUser ? `Snap & Snack <${smtpUser}>` : "Snap & Snack <onboarding@resend.dev>");
+
+  // 1. Primary: SMTP via Gmail
+  if (smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to,
+        subject: content.subject,
+        text: content.text,
+        html: content.html,
+      });
+
+      console.log(`Photos ready email sent via SMTP to ${maskEmail(to)} (messageId: ${info.messageId})`);
+      return { success: true, provider: "smtp", messageId: info.messageId };
+    } catch (smtpErr: any) {
+      console.error("SMTP delivery failed for photos ready email:", smtpErr?.message || smtpErr);
+      return { success: false, provider: "smtp", error: smtpErr?.message || String(smtpErr) };
+    }
+  }
+
+  // 2. Fallback: Resend API
+  if (resendApiKey) {
+    try {
+      const resendRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to,
+          subject: content.subject,
+          text: content.text,
+          html: content.html,
+        }),
+      });
+
+      if (!resendRes.ok) {
+        const errText = await resendRes.text();
+        console.error("Resend delivery failed for photos ready email with status:", resendRes.status);
+        return { success: false, provider: "resend", error: errText };
+      }
+
+      const resendData = await resendRes.json();
+      console.log(`Photos ready email sent via Resend to ${maskEmail(to)} (id: ${resendData.id})`);
+      return { success: true, provider: "resend", messageId: resendData.id };
+    } catch (resendErr: any) {
+      console.error("Resend delivery error for photos ready email:", resendErr?.message || resendErr);
+      return { success: false, provider: "resend", error: resendErr?.message || String(resendErr) };
+    }
+  }
+
+  // 3. Neither configured
+  console.log("email skipped (no SMTP or Resend credentials)");
+  return { success: true, provider: "skipped" };
 }

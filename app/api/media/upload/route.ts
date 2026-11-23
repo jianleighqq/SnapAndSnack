@@ -250,7 +250,7 @@ export async function POST(request: Request) {
 
       const { data: existing } = await supabaseServer
         .from("media_assets")
-        .select("id")
+        .select("id, in_gallery")
         .eq("session_id", targetSessionId)
         .eq("media_type", "GIF")
         .limit(1);
@@ -260,7 +260,7 @@ export async function POST(request: Request) {
           .from("media_assets")
           .update({
             storage_path: storagePath,
-            in_gallery: shouldBeInGallery ? true : false,
+            in_gallery: shouldBeInGallery || existing[0]?.in_gallery || false,
           })
           .eq("id", existing[0].id)
           .select("id")
@@ -291,9 +291,16 @@ export async function POST(request: Request) {
       }
     } else {
       // STRIP
+      const { count: galleryAssetCount } = await supabaseServer
+        .from("media_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("session_id", targetSessionId)
+        .eq("in_gallery", true);
+      const shouldBeInGallery = (galleryAssetCount || 0) > 0;
+
       const { data: existing } = await supabaseServer
         .from("media_assets")
-        .select("id")
+        .select("id, in_gallery")
         .eq("session_id", targetSessionId)
         .eq("media_type", "STRIP")
         .limit(1);
@@ -303,6 +310,7 @@ export async function POST(request: Request) {
           .from("media_assets")
           .update({
             storage_path: storagePath,
+            in_gallery: shouldBeInGallery || existing[0]?.in_gallery || false,
           })
           .eq("id", existing[0].id)
           .select("id")
@@ -320,7 +328,7 @@ export async function POST(request: Request) {
             session_id: targetSessionId,
             media_type: "STRIP",
             storage_path: storagePath,
-            in_gallery: false,
+            in_gallery: shouldBeInGallery ? true : false,
           })
           .select("id")
           .single();

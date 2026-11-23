@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import type { Event, QueueEntryWithGuest } from "@/lib/types";
 import QueueCustomerModal from "./QueueCustomerModal";
-import AddGuestModal from "./AddGuestModal";
+import AddGuestModal, { TicketQrDisplayData } from "./AddGuestModal";
 import { Pill } from "@/components/ui/Pill";
 import { Label } from "@/components/ui/Label";
 import { Tile } from "@/components/ui/Tile";
@@ -35,7 +35,12 @@ export default function QueueBoardView({
   const [queue, setQueue] = useState<QueueEntryWithGuest[]>(initialQueue);
   const [selectedEntry, setSelectedEntry] = useState<QueueEntryWithGuest | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [notification, setNotification] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    message: string;
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(null);
+  const [ticketQrData, setTicketQrData] = useState<TicketQrDisplayData | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [showAddGuestModal, setShowAddGuestModal] = useState(false);
 
@@ -45,9 +50,18 @@ export default function QueueBoardView({
   const abortControllerRef = useRef<AbortController | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const showNotification = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
+  const showNotification = (
+    msg: string | { message: string; actionLabel?: string; onAction?: () => void },
+    actionLabel?: string,
+    onAction?: () => void
+  ) => {
+    if (typeof msg === "object") {
+      setNotification(msg);
+      setTimeout(() => setNotification(null), msg.actionLabel ? 8000 : 3500);
+    } else {
+      setNotification({ message: msg, actionLabel, onAction });
+      setTimeout(() => setNotification(null), actionLabel ? 8000 : 3500);
+    }
   };
 
   // ONE single fetch function for both the poll and post-action refresh
@@ -248,9 +262,11 @@ export default function QueueBoardView({
         throw new Error(errJson.error || "Failed to add guest to queue");
       }
 
+      const resData = await res.json().catch(() => ({}));
+
       // Authoritative refresh using the ONE shared fetch function
       await fetchQueueData(true);
-      showNotification(`Added ${fullName} to queue.`);
+      return resData;
     } catch (err: any) {
       console.error(err);
       throw err;
@@ -293,9 +309,21 @@ export default function QueueBoardView({
     <div className="space-y-8">
       {/* Toast Notification */}
       {notification && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm text-paper">
-          <span className="h-2 w-2 rounded-full bg-accent" />
-          <span>{notification}</span>
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-full bg-ink px-5 py-3 text-sm text-paper shadow-2xl animate-fadeIn">
+          <span className="h-2 w-2 rounded-full bg-accent shrink-0" />
+          <span>{notification.message}</span>
+          {notification.actionLabel && notification.onAction && (
+            <button
+              type="button"
+              onClick={() => {
+                notification.onAction?.();
+                setNotification(null);
+              }}
+              className="font-mono text-xs font-bold uppercase tracking-wider text-accent underline hover:opacity-85 ml-1 shrink-0"
+            >
+              {notification.actionLabel}
+            </button>
+          )}
         </div>
       )}
 
@@ -493,9 +521,18 @@ export default function QueueBoardView({
       {/* Walk-in Add Guest Modal */}
       <AddGuestModal
         isOpen={showAddGuestModal}
-        onClose={() => setShowAddGuestModal(false)}
+        onClose={() => {
+          setShowAddGuestModal(false);
+          setTicketQrData(null);
+        }}
         onAdd={handleAddGuest}
         isLoading={isLoading}
+        onShowToast={showNotification}
+        initialQrData={ticketQrData}
+        onOpenTicketQr={(data) => {
+          setTicketQrData(data);
+          setShowAddGuestModal(true);
+        }}
       />
     </div>
   );
